@@ -1,0 +1,66 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# sarima-bayes  –  Example configuration file
+#
+# Copy this file to config.yaml and fill in your values.
+# config.yaml is listed in .gitignore so secrets are never committed.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── Data Ingestion ─────────────────────────────────────────────────────────────
+data:
+  # Path to the input Excel workbook (relative or absolute).
+  # See docs/methodology.md for the expected column structure.
+  input_path: "data/input/sales.xlsx"
+
+  # Optional: path to the representative-SKU mapping workbook.
+  # Remove this key if you do not use the merge_representatives step.
+  representatives_path: "data/input/representatives.xlsx"
+
+  # Name of the worksheet containing the time-series data.
+  sheet_name: "Data"
+
+  # Number of meta-header rows to skip before the column-name row.
+  # Set to 0 if your file has no extra header rows.
+  skip_rows: 2
+
+  # strptime-compatible format string for the Date column.
+  # "%Y%m" matches values like "202201" (January 2022).
+  date_format: "%Y%m"
+
+  # Extend the time axis up to this date when filling missing months.
+  end_date: "2026-01-01"
+
+# ── Optimisation ──────────────────────────────────────────────────────────────
+optimization:
+  # Inclusive integer ranges for the ARIMA(p, d, q) search space.
+  p_range: [0, 6]   # autoregressive order
+  d_range: [0, 2]   # degree of differencing
+  q_range: [0, 6]   # moving-average order
+
+  # Total number of Optuna trials per time series.
+  # Higher values improve quality but increase runtime.
+  n_calls: 50
+
+  # Number of parallel Optuna workers.
+  # Use -1 to auto-detect CPU cores; use 1 for deterministic single-thread runs.
+  n_jobs: 1
+
+# ── Forecast ──────────────────────────────────────────────────────────────────
+forecast:
+  # Number of months to forecast into the future.
+  n_periods: 12
+
+  # Significance level for SARIMA confidence intervals (0.05 → 95% CI).
+  alpha: 0.05
+
+# ── Output ────────────────────────────────────────────────────────────────────
+output:
+  # Directory where Excel result files will be written.
+  output_path: "data/output/"
+
+  # Run identifier prepended to every output filename.
+  # Increment this for each production run to avoid overwriting previous results.
+  run_id: "RUN-2025-01"
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  level: "INFO"   # DEBUG | INFO | WARNING | ERROR | CRITICAL
