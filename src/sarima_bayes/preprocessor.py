@@ -2,16 +2,17 @@
 
 This module provides three operations applied before model fitting:
 
-1. :func:`clean_zeros`           – removes SKU series with zero cumulative demand.
-2. :func:`fill_blanks`           – fills missing calendar months with zero demand.
-3. :func:`merge_representatives` – consolidates sales under representative SKUs.
+1. ``clean_zeros``           – removes SKU series with zero cumulative demand.
+2. ``fill_blanks``           – fills missing calendar months with zero demand.
+3. ``merge_representatives`` – consolidates sales under representative SKUs.
 
 All functions operate on ``pd.DataFrame`` inputs and return copies so that
 the caller's original data is never modified in-place.
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Optional
 
 import pandas as pd
 
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def clean_zeros(
     df: pd.DataFrame,
-    group_cols: Optional[list[str]] = None,
+    group_cols: list[str] | None = None,
     value_col: str = "CS",
 ) -> pd.DataFrame:
     """Remove groups whose cumulative demand is zero.
@@ -58,9 +59,9 @@ def clean_zeros(
 def fill_blanks(
     df: pd.DataFrame,
     date_col: str = "Date",
-    group_cols: Optional[list[str]] = None,
+    group_cols: list[str] | None = None,
     value_col: str = "CS",
-    end_date: Optional[str] = None,
+    end_date: str | None = None,
     freq: str = "MS",
 ) -> pd.DataFrame:
     """Fill missing calendar months with zero demand.

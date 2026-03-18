@@ -56,7 +56,15 @@ class TestWalkForwardValidation:
             test_size=6,
             min_train_size=24,
         )
-        required = {"fold", "train_start", "train_end", "test_start", "test_end", "sMAPE", "RMSLE"}
+        required = {
+            "fold",
+            "train_start",
+            "train_end",
+            "test_start",
+            "test_end",
+            "sMAPE",
+            "RMSLE",
+        }
         assert required.issubset(result.columns)
 
     def test_wfv_smape_nonneg(self, long_series):
@@ -89,9 +97,7 @@ class TestWalkForwardValidation:
             )
 
     def test_wfv_custom_metrics(self, long_series):
-        custom = {
-            "MAE": lambda a, b: float(np.mean(np.abs(np.array(a) - np.array(b))))
-        }
+        custom = {"MAE": lambda a, b: float(np.mean(np.abs(np.array(a) - np.array(b))))}
         result = walk_forward_validation(
             long_series,
             _fixed_horizon_model(6),

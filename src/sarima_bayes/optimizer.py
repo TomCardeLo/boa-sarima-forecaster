@@ -2,7 +2,7 @@
 
 This module uses Optuna's Tree-structured Parzen Estimator (TPE) to search
 the integer space of ``SARIMA(p, d, q)(P, D, Q, m)`` orders, minimising the
-combined cost function (0.7 · sMAPE + 0.3 · RMSLE) computed on in-sample
+combined cost function (0.7 * sMAPE + 0.3 * RMSLE) computed on in-sample
 predictions.
 
 Design decisions
@@ -10,23 +10,23 @@ Design decisions
 * **TPE sampler** with ``multivariate=True`` captures correlations between
   the *p*, *q*, *P*, and *Q* parameters, improving sample efficiency over
   independent univariate TPE.
-* **Warm start** injects two sensible initial trials (``SARIMA(1,1,1)(1,1,1,m)``
-  and ``AR(1)``) before the probabilistic surrogate model takes over, reducing
-  wasted evaluations early in the search.
-* **Soft-constraint penalty** (:data:`OPTIMIZER_PENALTY`) is returned on model
+* **Warm start** injects two sensible initial trials before the probabilistic
+  surrogate model takes over, reducing wasted evaluations early in the search.
+* **Soft-constraint penalty** (``OPTIMIZER_PENALTY``) is returned on model
   failure instead of raising an exception, so the TPE sampler learns to avoid
   infeasible regions without crashing the study.
 * **Complexity constraints** prune degenerate models before fitting:
-  ``(p+q) ≤ 4`` and ``(P+Q) ≤ 3``.
+  ``(p+q) <= 4`` and ``(P+Q) <= 3``.
 * **Reproducibility** is guaranteed via ``seed=42`` in the sampler.
-* **Seasonal period ``m``** is a fixed config parameter — it is NOT optimised.
+* **Seasonal period m** is a fixed config parameter — it is NOT optimised.
   Monthly data uses ``m=12`` (annual seasonality cycle).
 """
+
+from __future__ import annotations
 
 import logging
 import os
 import warnings as _warnings
-from typing import Optional
 
 import numpy as np
 import optuna
@@ -66,11 +66,11 @@ def _evaluate_arima(
     D: int = 0,
     Q: int = 0,
     m: int = DEFAULT_SEASONAL_PERIOD,
-) -> tuple[int, int, int, float, Optional[str]]:
+) -> tuple[int, int, int, float, str | None]:
     """Fit ``SARIMA(p,d,q)(P,D,Q,m)`` and compute the in-sample combined metric.
 
     This function is the atomic evaluation unit called by the Optuna objective.
-    On any exception it returns :data:`OPTIMIZER_PENALTY` so the optimiser can
+    On any exception it returns ``OPTIMIZER_PENALTY`` so the optimiser can
     continue exploring other parameter regions without crashing.
 
     Args:
@@ -82,7 +82,7 @@ def _evaluate_arima(
         D: Seasonal differencing order.
         Q: Seasonal moving-average order.
         m: Seasonal period (fixed, not optimised).  Defaults to
-            :data:`~sarima_bayes.config.DEFAULT_SEASONAL_PERIOD`.
+            ``DEFAULT_SEASONAL_PERIOD``.
 
     Returns:
         Tuple ``(p, d, q, score, error_message)`` where ``error_message``
@@ -126,65 +126,57 @@ def optimize_arima(
 ) -> tuple[dict[str, int], float]:
     """Search for optimal ``SARIMA(p,d,q)(P,D,Q,m)`` orders using Optuna TPE.
 
-    Minimises :func:`~sarima_bayes.metrics.combined_metric`
-    (0.7 · sMAPE + 0.3 · RMSLE) computed on in-sample predictions.
+    Minimises the combined metric (0.7 * sMAPE + 0.3 * RMSLE) computed on
+    in-sample predictions.
 
-    The study is pre-seeded with two warm-start trials:
+    The study is pre-seeded with two warm-start trials before the TPE
+    surrogate model takes over:
 
-    - ``SARIMA(1,1,1)(1,1,1,m)`` — a robust baseline for trending seasonal demand.
-    - ``ARIMA(1,0,0)``            — covers stationary series with short-memory
-      autocorrelation (no seasonal component).
+    - ``SARIMA(1,1,1)(1,1,1,m)``: robust baseline for trending seasonal demand.
+    - ``ARIMA(1,0,0)``: simple AR(1) for stationary, non-seasonal series.
 
-    Complexity constraints applied inside the objective (before fitting):
+    Complexity constraints are applied inside the objective before fitting
+    to avoid over-parameterised models:
 
-    - ``(p + q) > 4``  → returns :data:`OPTIMIZER_PENALTY` (avoids over-parameterised
-      non-seasonal component).
-    - ``(P + Q) > 3``  → returns :data:`OPTIMIZER_PENALTY` (avoids over-parameterised
-      seasonal component).
+    - ``(p + q) > 4``: returns ``OPTIMIZER_PENALTY`` immediately.
+    - ``(P + Q) > 3``: returns ``OPTIMIZER_PENALTY`` immediately.
 
-    These constraints prune unpromising regions cheaply without spending a full
-    model-fitting trial on them.
-
-    .. note::
-        ``m`` is a **fixed config parameter** — it is NOT part of the search
-        space.  For monthly demand planning, ``m=12`` captures annual seasonality.
-        Varying ``m`` would conflate model selection with data-frequency assumptions.
+    Note:
+        ``m`` is a fixed configuration parameter — it is **not** part of the
+        search space. For monthly demand planning, ``m=12`` captures the
+        annual seasonality cycle. Varying ``m`` would conflate model selection
+        with data-frequency assumptions.
 
     Args:
         series: 1-D NumPy array of historical observations (monthly demand).
-            Should contain at least ``max(p_range) + d_range[1] + m * D_range[1] + 5``
-            points to allow meaningful differencing.
-        p_range: ``(min, max)`` inclusive integer range for *p*.
+            Should contain at least
+            ``max(p_range) + d_range[1] + m * D_range[1] + 5`` points to
+            allow meaningful differencing. No NaN values allowed.
+        p_range: Inclusive ``(min, max)`` integer range for the AR order *p*.
             Defaults to ``(0, 3)``.
-        d_range: ``(min, max)`` inclusive integer range for *d*.
-            Defaults to ``(0, 2)``.
-        q_range: ``(min, max)`` inclusive integer range for *q*.
+        d_range: Inclusive ``(min, max)`` integer range for the differencing
+            order *d*. Defaults to ``(0, 2)``.
+        q_range: Inclusive ``(min, max)`` integer range for the MA order *q*.
             Defaults to ``(0, 3)``.
-        P_range: ``(min, max)`` inclusive integer range for seasonal AR order *P*.
-            Defaults to ``(0, 2)``.
-        D_range: ``(min, max)`` inclusive integer range for seasonal differencing *D*.
-            Defaults to ``(0, 1)``.
-        Q_range: ``(min, max)`` inclusive integer range for seasonal MA order *Q*.
-            Defaults to ``(0, 2)``.
-        m: Fixed seasonal period (not optimised).  Defaults to
-            :data:`~sarima_bayes.config.DEFAULT_SEASONAL_PERIOD` (12).
-        n_calls: Total number of Optuna trials.  Defaults to ``50``.
-        n_jobs: Number of parallel Optuna workers.  Use ``-1`` to
-            auto-detect CPU cores.  Defaults to ``1``.
+        P_range: Inclusive ``(min, max)`` integer range for the seasonal AR
+            order *P*. Defaults to ``(0, 2)``.
+        D_range: Inclusive ``(min, max)`` integer range for the seasonal
+            differencing order *D*. Defaults to ``(0, 1)``.
+        Q_range: Inclusive ``(min, max)`` integer range for the seasonal MA
+            order *Q*. Defaults to ``(0, 2)``.
+        m: Fixed seasonal period (not optimised). Must be a positive integer.
+            Defaults to 12 (annual cycle for monthly data).
+        n_calls: Total number of Optuna trials. Defaults to ``50``.
+        n_jobs: Number of parallel Optuna workers. Use ``-1`` to
+            auto-detect CPU cores. Defaults to ``1``.
 
     Returns:
-        Tuple ``(best_params, best_value)`` where:
-
-        - ``best_params`` – dict with keys ``"p"``, ``"d"``, ``"q"``,
-          ``"P"``, ``"D"``, ``"Q"``, ``"m"`` mapping to the optimal orders.
-        - ``best_value``  – the minimum combined metric score achieved.
-
-    Note:
-        Returns ``{"p":1,"d":1,"q":1,"P":1,"D":1,"Q":1,"m":m}`` and
-        :data:`OPTIMIZER_PENALTY` as a safe fallback if the entire study fails.
-
-    # BREAKING CHANGE: seasonal parameters now included in returned dict.
-    # All call sites must unpack P, D, Q, m in addition to p, d, q.
+        Tuple ``(best_params, best_value)`` where ``best_params`` is a dict
+        with keys ``"p"``, ``"d"``, ``"q"``, ``"P"``, ``"D"``, ``"Q"``,
+        ``"m"`` mapping to the optimal integer orders, and ``best_value`` is
+        the minimum combined metric score achieved. Falls back to
+        ``{"p":1,"d":1,"q":1,"P":1,"D":1,"Q":1,"m":m}`` and
+        ``OPTIMIZER_PENALTY`` if the entire study fails.
 
     Example:
         >>> import numpy as np
@@ -228,17 +220,31 @@ def optimize_arima(
     # ── Warm Start ─────────────────────────────────────────────────────────────
     # Enqueue known-good starting points before TPE's probabilistic model kicks
     # in.  This prevents wasting early trials on trivial (0,0,0)(0,0,0) combos.
-    study.enqueue_trial({"p": 1, "d": 1, "q": 1, "P": 1, "D": 1, "Q": 1})  # seasonal baseline
-    study.enqueue_trial({"p": 1, "d": 0, "q": 0, "P": 0, "D": 0, "Q": 0})  # simple AR(1)
+    study.enqueue_trial(
+        {"p": 1, "d": 1, "q": 1, "P": 1, "D": 1, "Q": 1}
+    )  # seasonal baseline
+    study.enqueue_trial(
+        {"p": 1, "d": 0, "q": 0, "P": 0, "D": 0, "Q": 0}
+    )  # simple AR(1)
 
     # ── Optimisation ───────────────────────────────────────────────────────────
     try:
         study.optimize(objective, n_trials=n_calls, n_jobs=n_jobs)
     except Exception as exc:
         logger.error("Optimisation study failed: %s", exc)
-        return {"p": 1, "d": 1, "q": 1, "P": 1, "D": 1, "Q": 1, "m": m}, OPTIMIZER_PENALTY
+        return {
+            "p": 1,
+            "d": 1,
+            "q": 1,
+            "P": 1,
+            "D": 1,
+            "Q": 1,
+            "m": m,
+        }, OPTIMIZER_PENALTY
 
-    raw = study.best_params  # {"p": int, "d": int, "q": int, "P": int, "D": int, "Q": int}
+    raw = (
+        study.best_params
+    )  # {"p": int, "d": int, "q": int, "P": int, "D": int, "Q": int}
     best_params = {
         "p": raw["p"],
         "d": raw["d"],

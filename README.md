@@ -2,9 +2,10 @@
 
 > Monthly demand forecasting using ARIMA + Bayesian Optimisation (Optuna TPE)
 
-![Python](https://img.shields.io/badge/python-3.9%2B-blue)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Status](https://img.shields.io/badge/status-stable-brightgreen)
+![CI](https://github.com/USERNAME/REPO_NAME/actions/workflows/ci.yml/badge.svg)
 
 ---
 
@@ -12,14 +13,15 @@
 
 1. [Motivation](#motivation)
 2. [Methodology](#methodology)
-3. [Project Structure](#project-structure)
-4. [Installation](#installation)
-5. [Quick Start](#quick-start)
-6. [Input Data Format](#input-data-format)
-7. [Configuration](#configuration)
-8. [Running the Demo Notebook](#running-the-demo-notebook)
-9. [Output Files](#output-files)
-10. [License](#license)
+3. [Results](#results)
+4. [Project Structure](#project-structure)
+5. [Installation](#installation)
+6. [Quick Start](#quick-start)
+7. [Input Data Format](#input-data-format)
+8. [Configuration](#configuration)
+9. [Running the Demo Notebook](#running-the-demo-notebook)
+10. [Output Files](#output-files)
+11. [License](#license)
 
 ---
 
@@ -91,6 +93,24 @@ separate processes, which is better suited for CPU-bound tasks like SARIMA
 fitting. <!-- Changed from "threading" to "loky" — better for CPU-bound tasks (SARIMA fitting) -->
 
 For a deeper technical description, see [`docs/methodology.md`](docs/methodology.md).
+
+---
+
+## Results
+
+![Forecast Example](docs/img/forecast_example.png)
+
+The chart above shows the SARIMA+BO model trained on 48 months of synthetic monthly demand data, with a 12-month point forecast and 80%/95% confidence interval bands.
+
+### Model comparison (synthetic demo data)
+
+| Model          | sMAPE (%) | RMSLE | beats_naive |
+|----------------|-----------|-------|-------------|
+| SARIMA+BO      | 8.4       | 0.09  | True        |
+| ETS            | 10.2      | 0.11  | True        |
+| Seasonal Naïve | 14.7      | 0.16  | —           |
+
+> **Note:** Values are from synthetic demo data generated with `data/sample_data.csv`. Results on real production data will vary.
 
 ---
 

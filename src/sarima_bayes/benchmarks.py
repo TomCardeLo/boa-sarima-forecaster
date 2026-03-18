@@ -39,13 +39,18 @@ def seasonal_naive(
     """Repeat the value from the same period one seasonal cycle ago.
 
     Args:
-        train: Historical series with a :class:`~pandas.DatetimeIndex`.
+        train: Historical series with a ``pd.DatetimeIndex``.
         forecast_horizon: Number of steps to forecast.
-        m: Seasonal period (default 12 for monthly data).
+        m: Seasonal period. Defaults to ``12`` for monthly data.
 
     Returns:
-        Forecast Series of length *forecast_horizon* with a future
-        :class:`~pandas.DatetimeIndex`.
+        Forecast Series of length ``forecast_horizon`` with a future
+        ``pd.DatetimeIndex``.
+
+    Example:
+        >>> forecast = seasonal_naive(train, forecast_horizon=6)
+        >>> len(forecast)
+        6
     """
     freq = train.index.freq or "MS"
     future_index = pd.date_range(
@@ -70,14 +75,20 @@ def seasonal_naive(
 def ets_model(train: pd.Series, forecast_horizon: int) -> pd.Series:
     """Holt-Winters additive ETS model via statsmodels.
 
-    Falls back to :func:`seasonal_naive` on any exception.
+    Falls back to ``seasonal_naive()`` on any exception (e.g. series too
+    short for seasonal decomposition).
 
     Args:
-        train: Historical series with a :class:`~pandas.DatetimeIndex`.
+        train: Historical series with a ``pd.DatetimeIndex``.
         forecast_horizon: Number of steps to forecast.
 
     Returns:
-        Forecast Series of length *forecast_horizon*.
+        Forecast Series of length ``forecast_horizon``.
+
+    Example:
+        >>> forecast = ets_model(train, forecast_horizon=6)
+        >>> len(forecast)
+        6
     """
     try:
         from statsmodels.tsa.holtwinters import ExponentialSmoothing
@@ -105,15 +116,20 @@ def ets_model(train: pd.Series, forecast_horizon: int) -> pd.Series:
 def auto_arima_nixtla(train: pd.Series, forecast_horizon: int) -> pd.Series:
     """AutoARIMA via the statsforecast (Nixtla) library.
 
-    Falls back to :func:`seasonal_naive` on any exception (e.g. if
+    Falls back to ``seasonal_naive()`` on any exception (e.g. if
     ``statsforecast`` is not installed).
 
     Args:
-        train: Historical series with a :class:`~pandas.DatetimeIndex`.
+        train: Historical series with a ``pd.DatetimeIndex``.
         forecast_horizon: Number of steps to forecast.
 
     Returns:
-        Forecast Series of length *forecast_horizon*.
+        Forecast Series of length ``forecast_horizon``.
+
+    Example:
+        >>> forecast = auto_arima_nixtla(train, forecast_horizon=6)
+        >>> len(forecast)
+        6
     """
     freq = train.index.freq or "MS"
     future_index = pd.date_range(
@@ -184,6 +200,16 @@ def run_benchmark_comparison(
         DataFrame with columns:
         ``[group_cols..., fold, model, train_start, train_end,
         test_start, test_end, sMAPE, RMSLE]``.
+
+    Example:
+        >>> results = run_benchmark_comparison(
+        ...     df, group_cols=["Country", "SKU"],
+        ...     target_col="CS", date_col="Date",
+        ...     sarima_model_fn=make_sarima_fn(),
+        ...     n_folds=3, test_size=6,
+        ... )
+        >>> "model" in results.columns
+        True
     """
     models: dict[str, Callable[[pd.Series], pd.Series]] = {
         "SARIMA+BO": sarima_model_fn,
@@ -244,13 +270,18 @@ def summary_table(results_df: pd.DataFrame, group_cols: list[str]) -> pd.DataFra
     """Aggregate fold-level benchmark results into a summary table.
 
     Args:
-        results_df: Output of :func:`run_benchmark_comparison`.
+        results_df: Output of ``run_benchmark_comparison()``.
         group_cols: Same group columns used during comparison.
 
     Returns:
         DataFrame with columns:
         ``[group_cols..., model, sMAPE_mean, sMAPE_std, RMSLE_mean,
         RMSLE_std, beats_naive]``, sorted by ``[group_cols..., sMAPE_mean]``.
+
+    Example:
+        >>> tbl = summary_table(results, group_cols=["Country", "SKU"])
+        >>> "beats_naive" in tbl.columns
+        True
     """
     agg = (
         results_df.groupby([*group_cols, "model"])[["sMAPE", "RMSLE"]]
