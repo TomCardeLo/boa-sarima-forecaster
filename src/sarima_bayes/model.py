@@ -2,19 +2,17 @@
 
 This module wraps statsmodels' ``SARIMAX`` to provide a clean interface for:
 
-- Fitting ``ARIMA(p, d, q)`` models on monthly sales series.
+- Fitting ``SARIMA(p, d, q)(P, D, Q, m)`` models on monthly sales series.
 - Generating multi-step ahead point forecasts with confidence intervals.
 - Formatting output DataFrames for downstream aggregation and export.
 
-Note:
-    Seasonal components ``(P, D, Q, s)`` are intentionally omitted in the
-    current implementation.  The Bayesian optimiser explores the non-seasonal
-    order space ``(p, d, q)`` only.  Seasonal extensions can be added by
-    passing a non-``None`` ``s_order`` tuple to :func:`pred_arima`.
+Seasonal components ``(P, D, Q, m)`` are optional — pass ``m=None`` to fit a
+plain ``ARIMA(p, d, q)`` model, or provide ``m`` to enable full SARIMA.
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Optional
 
 import pandas as pd
 from statsmodels.tsa.statespace.sarimax import SARIMAX
@@ -27,12 +25,10 @@ def pred_arima(
     col_x: str,
     col_y: str,
     order: tuple[int, int, int],
-    s_order: Optional[tuple[int, int, int, int]] = None,
+    s_order: tuple[int, int, int, int] | None = None,
     n_per: int = 12,
     alpha: float = 0.05,
-) -> tuple[
-    pd.DataFrame, Optional[pd.DataFrame], tuple, Optional[tuple], Optional[pd.Series]
-]:
+) -> tuple[pd.DataFrame, pd.DataFrame | None, tuple, tuple | None, pd.Series | None]:
     """Fit a SARIMA model and produce a multi-step forecast.
 
     This is the core forecasting engine.  The series index is set to
@@ -129,15 +125,12 @@ def forecast_arima(
     P: int = 0,
     D: int = 0,
     Q: int = 0,
-    m: Optional[int] = None,
+    m: int | None = None,
 ) -> pd.DataFrame:
     """Fit SARIMA and return a tidy forecast DataFrame (no Forecast group).
 
-    Convenience wrapper around :func:`pred_arima` that clips negative
+    Convenience wrapper around ``pred_arima()`` that clips negative
     predictions to zero and formats the output for concatenation.
-
-    # BREAKING CHANGE: seasonal parameters now included in returned dict.
-    # All call sites must unpack P, D, Q, m in addition to p, d, q.
 
     Args:
         bd: Historical sales DataFrame for the given ``country`` / ``sku``.
@@ -209,16 +202,13 @@ def forecast_arima_with_group(
     P: int = 0,
     D: int = 0,
     Q: int = 0,
-    m: Optional[int] = None,
+    m: int | None = None,
 ) -> pd.DataFrame:
     """Fit SARIMA and return a tidy forecast DataFrame (with Forecast group).
 
-    Identical to :func:`forecast_arima` but includes a ``"Forecast group"``
+    Identical to ``forecast_arima()`` but includes a ``"Forecast group"``
     column in the output.  Used when the dataset is segmented by product
     channel or distribution channel.
-
-    # BREAKING CHANGE: seasonal parameters now included in returned dict.
-    # All call sites must unpack P, D, Q, m in addition to p, d, q.
 
     Args:
         bd: Historical sales DataFrame for the given combination of
@@ -242,6 +232,13 @@ def forecast_arima_with_group(
         DataFrame with columns
         ``["Date", "Pred", "Country", "Sku", "Forecast group"]``.
         Returns an empty DataFrame on failure.
+
+    Example:
+        >>> result = forecast_arima_with_group(
+        ...     df, "Date", "CS", 1, 1, 1, 12, "US", 1001, "Traditional"
+        ... )
+        >>> result.columns.tolist()
+        ['Date', 'Pred', 'Country', 'Sku', 'Forecast group']
     """
     try:
         s_order = (P, D, Q, m) if m is not None else None

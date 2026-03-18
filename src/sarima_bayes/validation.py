@@ -35,7 +35,7 @@ def walk_forward_validation(
     look-ahead bias.
 
     Args:
-        series: Univariate time series with a :class:`~pandas.DatetimeIndex`.
+        series: Univariate time series with a ``pd.DatetimeIndex``.
         model_fn: Callable ``(train: pd.Series) -> pd.Series``.  The returned
             Series must contain exactly ``test_size`` predictions aligned with
             the test window.
@@ -53,6 +53,18 @@ def walk_forward_validation(
 
     Raises:
         ValueError: If ``n_folds < 3`` or the series is too short.
+
+    Example:
+        >>> import numpy as np, pandas as pd
+        >>> from statsmodels.tsa.statespace.sarimax import SARIMAX
+        >>> dates = pd.date_range("2020-01", periods=48, freq="MS")
+        >>> series = pd.Series(np.ones(48) * 100.0, index=dates)
+        >>> def naive_fn(train):
+        ...     idx = pd.date_range(train.index[-1], periods=5, freq="MS")[1:]
+        ...     return pd.Series([train.iloc[-1]] * 4, index=idx)
+        >>> result = walk_forward_validation(series, naive_fn, n_folds=3, test_size=4, min_train_size=24)
+        >>> len(result)
+        3
     """
     if n_folds < 3:
         raise ValueError(f"n_folds must be >= 3, got {n_folds}")
@@ -118,14 +130,26 @@ def validate_by_group(
             (e.g. ``["Country", "SKU"]``).
         target_col: Name of the column holding the target variable.
         date_col: Name of the date column (must be parseable as monthly dates).
-        model_fn: Passed unchanged to :func:`walk_forward_validation`.
+        model_fn: Passed unchanged to ``walk_forward_validation()``.
         **kwargs: Extra keyword arguments forwarded to
-            :func:`walk_forward_validation` (``n_folds``, ``test_size``,
-            ``min_train_size``, ``metrics_fn``).
+            ``walk_forward_validation()`` — ``n_folds``, ``test_size``,
+            ``min_train_size``, ``metrics_fn``.
 
     Returns:
         Concatenated DataFrame of all fold results, with ``group_cols``
-        prepended as additional columns.
+        prepended as additional columns.  Returns an empty DataFrame if
+        every group fails.
+
+    Raises:
+        No exceptions are propagated — per-group failures are logged as
+        warnings and the group is skipped.
+
+    Example:
+        >>> validate_by_group(
+        ...     df, group_cols=["Country", "SKU"],
+        ...     target_col="CS", date_col="Date",
+        ...     model_fn=naive_fn, n_folds=3, test_size=6,
+        ... )
     """
     all_results: list[pd.DataFrame] = []
 

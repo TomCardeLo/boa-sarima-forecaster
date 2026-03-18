@@ -15,9 +15,9 @@ combined metric score.
 
 Public functions
 ----------------
-clip_outliers
-    Clip a whole-series using global sigma or IQR statistics.
-weighted_moving_stats
+``clip_outliers``
+    Clip a whole series using global sigma or IQR statistics.
+``weighted_moving_stats``
     Per-observation local-neighbourhood smoother and clipper.
 """
 
@@ -84,8 +84,7 @@ def clip_outliers(
         upper = q3 + threshold * iqr
     else:
         raise ValueError(
-            f"clip_outliers: unknown method '{method}'. "
-            "Choose 'sigma' or 'iqr'."
+            f"clip_outliers: unknown method '{method}'. " "Choose 'sigma' or 'iqr'."
         )
 
     # Clip to computed bounds, then enforce non-negativity
@@ -97,7 +96,7 @@ def weighted_moving_stats(
     sales_data: list,
     window_size: int = 3,
     threshold: float = 2.5,
-) -> tuple:
+) -> tuple[float, float, float]:
     """Compute weighted moving average, std dev, and clipped value.
 
     For the observation at position ``row_index`` in ``sales_data``, the

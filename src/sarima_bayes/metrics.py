@@ -2,12 +2,12 @@
 
 This module provides pure-NumPy implementations of:
 
-- :func:`smape`  – Symmetric Mean Absolute Percentage Error
-- :func:`rmsle`  – Root Mean Squared Logarithmic Error
-- :func:`combined_metric` – Weighted hybrid cost function (0.7 sMAPE + 0.3 RMSLE)
+- ``smape``           – Symmetric Mean Absolute Percentage Error
+- ``rmsle``           – Root Mean Squared Logarithmic Error
+- ``combined_metric`` – Weighted hybrid cost function (0.7 sMAPE + 0.3 RMSLE)
 
-The :func:`combined_metric` is the primary objective minimised by the Bayesian
-optimiser in :mod:`sarima_bayes.optimizer`.  The combination balances
+``combined_metric`` is the primary objective minimised by the Bayesian
+optimiser in ``sarima_bayes.optimizer``.  The combination balances
 percentage-level accuracy (sMAPE) with log-scale stability (RMSLE), which
 works well for demand series that contain intermittent zeros and occasional
 large spikes.
@@ -97,8 +97,8 @@ def combined_metric(
 
     Default weights (0.7 / 0.3) place more emphasis on relative percentage
     accuracy while giving RMSLE enough influence to penalise large absolute
-    errors in high-volume SKUs.  This function is the *objective minimised*
-    by the Optuna study in :func:`~sarima_bayes.optimizer.optimize_arima`.
+    errors in high-volume SKUs.  This function is the objective minimised
+    by the Optuna study in ``optimize_arima()``.
 
     Args:
         y_true: Array of observed values. Shape ``(n,)``.
