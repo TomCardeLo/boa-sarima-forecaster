@@ -27,9 +27,11 @@ model
     SARIMA model fitting and forecast generation.
 """
 
+from sarima_bayes.benchmarks import run_benchmark_comparison, summary_table
 from sarima_bayes.metrics import combined_metric, rmsle, smape
 from sarima_bayes.model import forecast_arima, pred_arima
 from sarima_bayes.optimizer import optimize_arima
+from sarima_bayes.validation import validate_by_group, walk_forward_validation
 
 __all__ = [
     "optimize_arima",
@@ -38,4 +40,8 @@ __all__ = [
     "combined_metric",
     "smape",
     "rmsle",
+    "walk_forward_validation",
+    "validate_by_group",
+    "run_benchmark_comparison",
+    "summary_table",
 ]

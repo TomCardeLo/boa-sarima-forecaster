@@ -310,6 +310,30 @@ Expected runtime: **< 2 minutes** on a standard laptop (demo budget: 15–20 tri
 
 ---
 
+## Validation & Benchmarks
+
+Walk-forward (expanding window) cross-validation evaluates models on true out-of-sample
+periods. Each fold extends the training window by `test_size` months while keeping the
+test window fixed, preventing look-ahead bias.
+
+### Baseline models
+
+| Model | Description | Why included |
+|-------|-------------|--------------|
+| `seasonal_naive` | Repeats value from same period last year | Lowest bar — if SARIMA can't beat this, it's not adding value |
+| `ets_model` | Holt-Winters additive trend+seasonal | Classical statistical benchmark |
+| `auto_arima_nixtla` | AutoARIMA via statsforecast | Fast automated ARIMA without Bayesian search overhead |
+
+### Example summary table
+
+| Country | SKU  | model         | sMAPE_mean | RMSLE_mean | beats_naive |
+|---------|------|---------------|------------|------------|-------------|
+| US      | 1001 | SARIMA+BO     | 8.4        | 0.09       | True        |
+| US      | 1001 | ETS           | 10.2       | 0.11       | True        |
+| US      | 1001 | seasonal_naive| 14.7       | 0.16       | —           |
+
+---
+
 ## Output Files
 
 The pipeline produces four Excel files in `data/output/`:
