@@ -14,9 +14,8 @@ Note:
 """
 
 import logging
-from typing import Optional, Tuple
+from typing import Optional
 
-import numpy as np
 import pandas as pd
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
@@ -27,11 +26,13 @@ def pred_arima(
     bd: pd.DataFrame,
     col_x: str,
     col_y: str,
-    order: Tuple[int, int, int],
-    s_order: Optional[Tuple[int, int, int, int]] = None,
+    order: tuple[int, int, int],
+    s_order: Optional[tuple[int, int, int, int]] = None,
     n_per: int = 12,
     alpha: float = 0.05,
-) -> Tuple[pd.DataFrame, Optional[pd.DataFrame], tuple, Optional[tuple], Optional[pd.Series]]:
+) -> tuple[
+    pd.DataFrame, Optional[pd.DataFrame], tuple, Optional[tuple], Optional[pd.Series]
+]:
     """Fit a SARIMA model and produce a multi-step forecast.
 
     This is the core forecasting engine.  The series index is set to

@@ -34,9 +34,19 @@ dev = [
 where = ["src"]
 
 [tool.black]
-line-length = 100
+line-length = 88
 target-version = ["py39", "py310", "py311"]
 
 [tool.ruff]
-line-length = 100
-select = ["E", "F", "W", "I"]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.ruff.lint.per-file-ignores]
+"notebooks/*.ipynb" = ["E402"]

@@ -207,14 +207,14 @@ The pipeline processes multiple `(Country, SKU)` combinations in parallel
 using `joblib.Parallel` with the threading backend:
 
 ```python
-Parallel(n_jobs=-1, backend="threading", verbose=0)(
+Parallel(n_jobs=-1, backend="loky", verbose=0)(  # Changed from "threading" to "loky" — better for CPU-bound tasks (SARIMA fitting)
     delayed(process_sku)(country, sku, data) for country, sku in combinations
 )
 ```
 
-Using threads (rather than processes) avoids serialisation overhead and
-is compatible with Python's free-threaded builds (3.14t+), where NumPy and
-Pandas operations release the GIL natively.
+Using the `loky` process-based backend is better suited for CPU-bound tasks
+like SARIMA fitting, as each worker runs in a separate process and avoids
+GIL contention.
 
 ---
 

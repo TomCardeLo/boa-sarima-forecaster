@@ -85,8 +85,10 @@ to zero.
 
 ### 5 — Parallel Execution
 
-The per-SKU loop is parallelised with `joblib.Parallel(backend="threading")`,
-enabling all available CPU cores to be utilised without pickling overhead.
+The per-SKU loop is parallelised with `joblib.Parallel(backend="loky")`,
+enabling all available CPU cores to be utilised. The `loky` backend uses
+separate processes, which is better suited for CPU-bound tasks like SARIMA
+fitting. <!-- Changed from "threading" to "loky" — better for CPU-bound tasks (SARIMA fitting) -->
 
 For a deeper technical description, see [`docs/methodology.md`](docs/methodology.md).
 
@@ -134,7 +136,7 @@ boa-sarima-forecaster/
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/boa-sarima-forecaster.git
+git clone https://github.com/TomCardeLo/boa-sarima-forecaster
 cd boa-sarima-forecaster
 
 # Create and activate a virtual environment
