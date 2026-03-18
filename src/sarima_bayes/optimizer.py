@@ -20,7 +20,8 @@ Design decisions
 
 import logging
 import os
-from typing import Dict, Optional, Tuple
+import warnings as _warnings
+from typing import Optional
 
 import numpy as np
 import optuna
@@ -31,7 +32,6 @@ from sarima_bayes.metrics import combined_metric
 
 # Suppress Optuna's internal progress logs and experimental warnings
 optuna.logging.set_verbosity(optuna.logging.WARNING)
-import warnings as _warnings
 _warnings.filterwarnings("ignore", category=optuna.exceptions.ExperimentalWarning)
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ def _evaluate_arima(
     p: int,
     d: int,
     q: int,
-) -> Tuple[int, int, int, float, Optional[str]]:
+) -> tuple[int, int, int, float, Optional[str]]:
     """Fit ``ARIMA(p, d, q)`` and compute the in-sample combined metric.
 
     This function is the atomic evaluation unit called by the Optuna objective.
@@ -89,12 +89,12 @@ def _evaluate_arima(
 
 def optimize_arima(
     series: np.ndarray,
-    p_range: Tuple[int, int] = (0, 6),
-    d_range: Tuple[int, int] = (0, 2),
-    q_range: Tuple[int, int] = (0, 6),
+    p_range: tuple[int, int] = (0, 6),
+    d_range: tuple[int, int] = (0, 2),
+    q_range: tuple[int, int] = (0, 6),
     n_calls: int = 50,
     n_jobs: int = 1,
-) -> Tuple[Dict[str, int], float]:
+) -> tuple[dict[str, int], float]:
     """Search for optimal ``ARIMA(p, d, q)`` orders using Optuna TPE.
 
     Minimises :func:`~sarima_bayes.metrics.combined_metric`
@@ -176,8 +176,8 @@ def optimize_arima(
         logger.error("Optimisation study failed: %s", exc)
         return {"p": 1, "d": 1, "q": 1}, _PENALTY
 
-    best_params = study.best_params   # {"p": int, "d": int, "q": int}
-    best_value = study.best_value     # float
+    best_params = study.best_params  # {"p": int, "d": int, "q": int}
+    best_value = study.best_value  # float
 
     logger.info(
         "Best ARIMA params: %s  |  Score: %.4f",

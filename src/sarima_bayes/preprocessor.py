@@ -11,7 +11,7 @@ the caller's original data is never modified in-place.
 """
 
 import logging
-from typing import List, Optional
+from typing import Optional
 
 import pandas as pd
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def clean_zeros(
     df: pd.DataFrame,
-    group_cols: Optional[List[str]] = None,
+    group_cols: Optional[list[str]] = None,
     value_col: str = "CS",
 ) -> pd.DataFrame:
     """Remove groups whose cumulative demand is zero.
@@ -58,7 +58,7 @@ def clean_zeros(
 def fill_blanks(
     df: pd.DataFrame,
     date_col: str = "Date",
-    group_cols: Optional[List[str]] = None,
+    group_cols: Optional[list[str]] = None,
     value_col: str = "CS",
     end_date: Optional[str] = None,
     freq: str = "MS",
