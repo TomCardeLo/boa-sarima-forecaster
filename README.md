@@ -58,10 +58,11 @@ consolidation).
 
 ### 2 — Outlier Standardisation
 
-A weighted moving-average smoother clips each observation to ±1σ of its
-neighbourhood, generating an `adjusted_value` column alongside the raw
-demand.  Both columns are modelled independently; the one with the lower
-optimisation score is used for the final forecast.
+A weighted moving-average smoother clips each observation to ±2.5σ of its
+neighbourhood (configurable via `sigma_threshold`), generating an
+`adjusted_value` column alongside the raw demand.  Both columns are modelled
+independently; the one with the lower optimisation score is used for the final
+forecast.
 
 ### 3 — Bayesian Optimisation (Optuna TPE)
 

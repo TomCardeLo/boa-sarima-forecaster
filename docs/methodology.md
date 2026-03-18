@@ -127,6 +127,15 @@ CV > 1.0 or series with a high proportion of zero periods, as these are
 most likely to have heavy-tailed distributions where σ-based clipping is
 unreliable.
 
+### Why 2.5σ instead of 1σ?
+
+A 1σ threshold clips ~32% of normally distributed observations, which in
+demand planning means removing legitimate spikes from promotions, new
+product launches, or seasonal peaks. The 2.5σ default balances noise
+removal with signal preservation. For very clean data (no promotions),
+lower thresholds (1.5–2.0) may be appropriate. Configure via
+`standardization.sigma_threshold` in `config.yaml`.
+
 ---
 
 ## 2b. Seasonal Parameter Optimisation

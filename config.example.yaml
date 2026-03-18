@@ -67,15 +67,8 @@ model:
 
 # ── Standardization ────────────────────────────────────────────────────────────
 standardization:
-  clipping:
-    method: "sigma"   # Options: "sigma" (mean ± threshold*std), "iqr" (Tukey fences)
-    threshold: 2.5    # For sigma: multiplier of std. For iqr: multiplier of IQR.
-    # NOTE: The previous default was 1.0 sigma, which clips ~32% of values in a
-    # normal distribution. This is too aggressive for demand series containing
-    # promotions, seasonal spikes, or new product launches. 2.5 sigma clips only
-    # ~1.2% of values while still removing true anomalies. Use "iqr" with
-    # threshold=1.5 for series with heavy-tailed distributions or frequent
-    # promotions (typically those with coefficient of variation > 1.0).
+  window: 6
+  sigma_threshold: 2.5  # ±Nσ clipping. Use 1.0-2.0 for clean data, 2.5-3.0 for promo-heavy series
 
 # ── Forecast ──────────────────────────────────────────────────────────────────
 forecast:

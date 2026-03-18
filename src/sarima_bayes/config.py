@@ -58,3 +58,6 @@ DEFAULT_N_CALLS: int = 30
 # Configurable via config.yaml standardization.clipping.
 DEFAULT_CLIP_METHOD: str = "sigma"
 DEFAULT_CLIP_THRESHOLD: float = 2.5
+
+# Outlier clipping
+OUTLIER_SIGMA: float = 2.5  # ±2.5σ (previously 1.0; 1σ is too aggressive for promo-driven demand)

@@ -27,32 +27,20 @@ import pandas as pd
 
 def clip_outliers(
     series: pd.Series,
-    method: str = "sigma",
-    threshold: float = 2.5,
+    window: int = 6,
+    sigma_threshold: float = 2.5,
 ) -> pd.Series:
     """Clip outliers from a time series using global statistics.
 
     Args:
-        series: Input time series. Must not contain NaN.
-        method: Clipping method.  One of:
-
-            - ``"sigma"`` — clip values beyond ``mean ± threshold * std``.
-            - ``"iqr"``   — clip values beyond
-              ``Q1 − threshold * IQR`` and ``Q3 + threshold * IQR``
-              (Tukey fences when ``threshold=1.5``).
-
-        threshold: Multiplier for the clipping boundary.
-
-            - For ``"sigma"``: default ``2.5`` clips ~1.2 % of a normal
-              distribution, retaining legitimate demand events such as
-              promotions and seasonal peaks.
-            - For ``"iqr"``: default ``1.5`` (classic Tukey fence), which
-              is preferable for heavy-tailed or intermittent-demand SKUs.
+        series: Raw demand series.
+        window: Rolling window size for moving average.
+        sigma_threshold: Number of standard deviations for clipping bounds.
+            Default 2.5. Values below 2.0 risk clipping legitimate demand
+            spikes from promotions or seasonal events.
 
     Returns:
-        Series with outliers clipped to the computed bounds, then clipped
-        again to ``0`` from below (demand cannot be negative).
-        Same index as input.  No NaN values.
+        Series with outliers clipped to ±sigma_threshold of the local mean.
 
     Raises:
         ValueError: If ``method`` is not ``"sigma"`` or ``"iqr"``.
@@ -74,14 +62,14 @@ def clip_outliers(
     if method == "sigma":
         mu = series.mean()
         sigma = series.std(ddof=1)
-        lower = mu - threshold * sigma
-        upper = mu + threshold * sigma
+        lower = mu - sigma_threshold * sigma
+        upper = mu + sigma_threshold * sigma
     elif method == "iqr":
         q1 = series.quantile(0.25)
         q3 = series.quantile(0.75)
         iqr = q3 - q1
-        lower = q1 - threshold * iqr
-        upper = q3 + threshold * iqr
+        lower = q1 - sigma_threshold * iqr
+        upper = q3 + sigma_threshold * iqr
     else:
         raise ValueError(
             f"clip_outliers: unknown method '{method}'. " "Choose 'sigma' or 'iqr'."
