@@ -31,10 +31,13 @@ data:
 
 # ── Optimisation ──────────────────────────────────────────────────────────────
 optimization:
-  # Inclusive integer ranges for the ARIMA(p, d, q) search space.
-  p_range: [0, 6]   # autoregressive order
+  # Inclusive integer ranges for the SARIMA(p,d,q)(P,D,Q,m) search space.
+  p_range: [0, 3]   # autoregressive order
   d_range: [0, 2]   # degree of differencing
-  q_range: [0, 6]   # moving-average order
+  q_range: [0, 3]   # moving-average order
+  P_range: [0, 2]   # seasonal AR order
+  D_range: [0, 1]   # seasonal differencing order
+  Q_range: [0, 2]   # seasonal MA order
 
   # Total number of Optuna trials per time series.
   # Higher values improve quality but increase runtime.
@@ -43,6 +46,36 @@ optimization:
   # Number of parallel Optuna workers.
   # Use -1 to auto-detect CPU cores; use 1 for deterministic single-thread runs.
   n_jobs: 1
+
+# ── Model ──────────────────────────────────────────────────────────────────────
+model:
+  sarima:
+    # Fixed seasonal period (m) — NOT optimised by the Bayesian search.
+    # 12 for monthly data captures the annual demand cycle.
+    seasonal_period: 12
+
+    # Complexity constraints applied before fitting each trial (penalty = 1e6):
+    #   (p + q) <= 4   — limits non-seasonal parameter count
+    #   (P + Q) <= 3   — limits seasonal parameter count
+    search_space:
+      p: [0, 3]
+      d: [0, 2]
+      q: [0, 3]
+      P: [0, 2]
+      D: [0, 1]
+      Q: [0, 2]
+
+# ── Standardization ────────────────────────────────────────────────────────────
+standardization:
+  clipping:
+    method: "sigma"   # Options: "sigma" (mean ± threshold*std), "iqr" (Tukey fences)
+    threshold: 2.5    # For sigma: multiplier of std. For iqr: multiplier of IQR.
+    # NOTE: The previous default was 1.0 sigma, which clips ~32% of values in a
+    # normal distribution. This is too aggressive for demand series containing
+    # promotions, seasonal spikes, or new product launches. 2.5 sigma clips only
+    # ~1.2% of values while still removing true anomalies. Use "iqr" with
+    # threshold=1.5 for series with heavy-tailed distributions or frequent
+    # promotions (typically those with coefficient of variation > 1.0).
 
 # ── Forecast ──────────────────────────────────────────────────────────────────
 forecast:
