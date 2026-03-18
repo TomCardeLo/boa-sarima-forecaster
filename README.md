@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Status](https://img.shields.io/badge/status-stable-brightgreen)
-![CI](https://github.com/USERNAME/REPO_NAME/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/TomCardeLo/boa-sarima-forecaster/actions/workflows/ci.yml/badge.svg)
 
 ---
 

@@ -37,4 +37,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   training history, last-24-months actuals, point forecast, and 80%/95% CI bands;
   generated reproducibly via `scripts/generate_plots.py`.
 
-[1.0.0]: https://github.com/USERNAME/REPO_NAME/releases/tag/v1.0.0
+[1.0.0]: https://github.com/TomCardeLo/boa-sarima-forecaster/releases/tag/v1.0.0
