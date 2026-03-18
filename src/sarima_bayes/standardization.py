@@ -5,22 +5,98 @@ This module implements a custom rolling-window smoother that:
 1. Computes a *weighted* average of temporal neighbours (closer neighbours
    receive higher weight).
 2. Computes a *weighted* standard deviation around that average.
-3. **Clips** the original value to ``[mean − σ, mean + σ]``, replacing
-   extreme spikes with a more conservative estimate.
+3. **Clips** the original value to ``[mean − threshold·σ, mean + threshold·σ]``,
+   replacing extreme spikes with a more conservative estimate.
 
 The clipped values are stored as an alternative demand column
 (``valor_ajustado`` in the pipeline) alongside the raw demand, allowing the
 downstream optimiser to choose whichever representation yields the lower
 combined metric score.
+
+Public functions
+----------------
+clip_outliers
+    Clip a whole-series using global sigma or IQR statistics.
+weighted_moving_stats
+    Per-observation local-neighbourhood smoother and clipper.
 """
 
 import numpy as np
+import pandas as pd
+
+
+def clip_outliers(
+    series: pd.Series,
+    method: str = "sigma",
+    threshold: float = 2.5,
+) -> pd.Series:
+    """Clip outliers from a time series using global statistics.
+
+    Args:
+        series: Input time series. Must not contain NaN.
+        method: Clipping method.  One of:
+
+            - ``"sigma"`` — clip values beyond ``mean ± threshold * std``.
+            - ``"iqr"``   — clip values beyond
+              ``Q1 − threshold * IQR`` and ``Q3 + threshold * IQR``
+              (Tukey fences when ``threshold=1.5``).
+
+        threshold: Multiplier for the clipping boundary.
+
+            - For ``"sigma"``: default ``2.5`` clips ~1.2 % of a normal
+              distribution, retaining legitimate demand events such as
+              promotions and seasonal peaks.
+            - For ``"iqr"``: default ``1.5`` (classic Tukey fence), which
+              is preferable for heavy-tailed or intermittent-demand SKUs.
+
+    Returns:
+        Series with outliers clipped to the computed bounds, then clipped
+        again to ``0`` from below (demand cannot be negative).
+        Same index as input.  No NaN values.
+
+    Raises:
+        ValueError: If ``method`` is not ``"sigma"`` or ``"iqr"``.
+        ValueError: If ``series`` contains NaN (caller must handle nulls first).
+
+    Example:
+        >>> import pandas as pd
+        >>> s = pd.Series([100.0, 105.0, 800.0, 98.0, 102.0])
+        >>> clipped = clip_outliers(s, method="sigma", threshold=2.5)
+        >>> clipped[2] < 800
+        True
+    """
+    if series.isna().any():
+        raise ValueError(
+            "clip_outliers: series contains NaN values. "
+            "Handle missing values before clipping."
+        )
+
+    if method == "sigma":
+        mu = series.mean()
+        sigma = series.std(ddof=1)
+        lower = mu - threshold * sigma
+        upper = mu + threshold * sigma
+    elif method == "iqr":
+        q1 = series.quantile(0.25)
+        q3 = series.quantile(0.75)
+        iqr = q3 - q1
+        lower = q1 - threshold * iqr
+        upper = q3 + threshold * iqr
+    else:
+        raise ValueError(
+            f"clip_outliers: unknown method '{method}'. "
+            "Choose 'sigma' or 'iqr'."
+        )
+
+    # Clip to computed bounds, then enforce non-negativity
+    return series.clip(lower=lower, upper=upper).clip(lower=0)
 
 
 def weighted_moving_stats(
     row_index: int,
     sales_data: list,
     window_size: int = 3,
+    threshold: float = 2.5,
 ) -> tuple:
     """Compute weighted moving average, std dev, and clipped value.
 
@@ -31,7 +107,8 @@ def weighted_moving_stats(
 
     - A *weighted mean* of the neighbourhood (excluding the centre point).
     - A *weighted standard deviation* of that neighbourhood.
-    - The centre value **clipped** to ``[mean − σ, mean + σ]``.
+    - The centre value **clipped** to
+      ``[mean − threshold·σ, mean + threshold·σ]``.
 
     Neighbours at distance > 3 receive weight 0 (effectively ignored).
     The function is designed to be called row-by-row within a loop over
@@ -44,6 +121,11 @@ def weighted_moving_stats(
             chronologically (all periods for one SKU/country combination).
         window_size: Number of neighbours to consider on each side of the
             centre point.  Defaults to ``3``.
+        threshold: Number of weighted standard deviations used as the
+            clipping boundary.  Defaults to ``2.5`` (clips ~1.2 % of a
+            normal distribution).  The previous default of ``1.0`` clipped
+            ~32 % of values — too aggressive for demand series containing
+            promotions or seasonal peaks.
 
     Returns:
         Tuple ``(weighted_mean, weighted_std, clipped_value)`` where:
@@ -51,7 +133,7 @@ def weighted_moving_stats(
         - ``weighted_mean``  – weighted average of neighbours (``float``).
         - ``weighted_std``   – weighted standard deviation (``float``).
         - ``clipped_value``  – original value clipped to
-          ``[mean − σ, mean + σ]`` (``float``).
+          ``[mean − threshold·σ, mean + threshold·σ]`` (``float``).
 
     Note:
         If there are no valid neighbours (e.g. a single-element series),
@@ -105,10 +187,10 @@ def weighted_moving_stats(
     weighted_variance = np.sum(weights * (neighbours - weighted_mean) ** 2) / weight_sum
     weighted_std = np.sqrt(max(0.0, weighted_variance))
 
-    # Clip the original observation to ±1σ around the weighted mean
+    # Clip the original observation to ±threshold·σ around the weighted mean
     original_value = sales_data[row_index]
-    lower_bound = weighted_mean - weighted_std
-    upper_bound = weighted_mean + weighted_std
+    lower_bound = weighted_mean - threshold * weighted_std
+    upper_bound = weighted_mean + threshold * weighted_std
     clipped_value = float(np.clip(original_value, lower_bound, upper_bound))
 
     return float(weighted_mean), float(weighted_std), round(clipped_value)

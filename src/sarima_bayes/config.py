@@ -29,11 +29,32 @@ DEFAULT_FREQ: str = "MS"  # Pandas offset alias for month start
 #   p – autoregressive order  (how many lagged observations to include)
 #   d – degree of differencing (how many times to difference for stationarity)
 #   q – moving-average order   (how many lagged forecast errors to include)
-DEFAULT_P_RANGE: tuple = (0, 6)
+#   P – seasonal AR order
+#   D – seasonal differencing order
+#   Q – seasonal MA order
+DEFAULT_P_RANGE: tuple = (0, 3)
 DEFAULT_D_RANGE: tuple = (0, 2)
-DEFAULT_Q_RANGE: tuple = (0, 6)
+DEFAULT_Q_RANGE: tuple = (0, 3)
+DEFAULT_P_SEASONAL_RANGE: tuple = (0, 2)
+DEFAULT_D_SEASONAL_RANGE: tuple = (0, 1)
+DEFAULT_Q_SEASONAL_RANGE: tuple = (0, 2)
+
+# ── Seasonal Period ───────────────────────────────────────────────────────────
+# Fixed seasonal period (m) — NOT optimised.  12 for monthly data (annual cycle).
+# Configurable via config.yaml model.sarima.seasonal_period.
+DEFAULT_SEASONAL_PERIOD: int = 12
 
 # ── Optimisation Budget ───────────────────────────────────────────────────────
 # Total number of Optuna trials (model evaluations) per time series.
 # Increasing this value improves solution quality at the cost of runtime.
 DEFAULT_N_CALLS: int = 30
+
+# ── Outlier Clipping ──────────────────────────────────────────────────────────
+# Method and threshold used by clip_outliers in standardization.py.
+#   method    – "sigma" (mean ± threshold*std) or "iqr" (Tukey fences)
+#   threshold – multiplier for the clipping boundary.
+#               For "sigma": 2.5 clips ~1.2% of a normal distribution.
+#               For "iqr":   1.5 is the classic Tukey fence.
+# Configurable via config.yaml standardization.clipping.
+DEFAULT_CLIP_METHOD: str = "sigma"
+DEFAULT_CLIP_THRESHOLD: float = 2.5

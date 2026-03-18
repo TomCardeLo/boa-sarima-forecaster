@@ -126,11 +126,18 @@ def forecast_arima(
     n_per: int,
     country: str,
     sku: int,
+    P: int = 0,
+    D: int = 0,
+    Q: int = 0,
+    m: Optional[int] = None,
 ) -> pd.DataFrame:
-    """Fit ARIMA and return a tidy forecast DataFrame (no Forecast group).
+    """Fit SARIMA and return a tidy forecast DataFrame (no Forecast group).
 
     Convenience wrapper around :func:`pred_arima` that clips negative
     predictions to zero and formats the output for concatenation.
+
+    # BREAKING CHANGE: seasonal parameters now included in returned dict.
+    # All call sites must unpack P, D, Q, m in addition to p, d, q.
 
     Args:
         bd: Historical sales DataFrame for the given ``country`` / ``sku``.
@@ -142,6 +149,11 @@ def forecast_arima(
         n_per: Number of forecast periods.
         country: Country label (for output tagging).
         sku: SKU identifier (for output tagging).
+        P: Seasonal AR order.  Defaults to ``0``.
+        D: Seasonal differencing order.  Defaults to ``0``.
+        Q: Seasonal MA order.  Defaults to ``0``.
+        m: Seasonal period.  Pass ``None`` to fit a non-seasonal ARIMA
+            (equivalent to ``P=D=Q=0``).  Defaults to ``None``.
 
     Returns:
         DataFrame with columns ``["Date", "Pred", "Country", "Sku"]``.
@@ -153,12 +165,13 @@ def forecast_arima(
         ['Date', 'Pred', 'Country', 'Sku']
     """
     try:
+        s_order = (P, D, Q, m) if m is not None else None
         forecast_df, _, _, _, _ = pred_arima(
             bd=bd,
             col_x=col_x,
             col_y=col_y,
             order=(p, d, q),
-            s_order=None,
+            s_order=s_order,
             n_per=n_per,
         )
 
@@ -193,12 +206,19 @@ def forecast_arima_with_group(
     country: str,
     sku: int,
     forecast_group: str,
+    P: int = 0,
+    D: int = 0,
+    Q: int = 0,
+    m: Optional[int] = None,
 ) -> pd.DataFrame:
-    """Fit ARIMA and return a tidy forecast DataFrame (with Forecast group).
+    """Fit SARIMA and return a tidy forecast DataFrame (with Forecast group).
 
     Identical to :func:`forecast_arima` but includes a ``"Forecast group"``
     column in the output.  Used when the dataset is segmented by product
     channel or distribution channel.
+
+    # BREAKING CHANGE: seasonal parameters now included in returned dict.
+    # All call sites must unpack P, D, Q, m in addition to p, d, q.
 
     Args:
         bd: Historical sales DataFrame for the given combination of
@@ -212,6 +232,11 @@ def forecast_arima_with_group(
         country: Country label.
         sku: SKU identifier.
         forecast_group: Forecast group / channel identifier.
+        P: Seasonal AR order.  Defaults to ``0``.
+        D: Seasonal differencing order.  Defaults to ``0``.
+        Q: Seasonal MA order.  Defaults to ``0``.
+        m: Seasonal period.  Pass ``None`` to fit a non-seasonal ARIMA.
+            Defaults to ``None``.
 
     Returns:
         DataFrame with columns
@@ -219,12 +244,13 @@ def forecast_arima_with_group(
         Returns an empty DataFrame on failure.
     """
     try:
+        s_order = (P, D, Q, m) if m is not None else None
         forecast_df, _, _, _, _ = pred_arima(
             bd=bd,
             col_x=col_x,
             col_y=col_y,
             order=(p, d, q),
-            s_order=None,
+            s_order=s_order,
             n_per=n_per,
         )
 

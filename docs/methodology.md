@@ -63,25 +63,138 @@ For every observation at index *i*, the algorithm:
    - Distance 3 → 0.1
 3. Computes the **weighted mean** μ and **weighted standard deviation** σ
    of the neighbourhood (excluding the centre point itself).
-4. **Clips** the original value to [μ − σ, μ + σ].
+4. **Clips** the original value to [μ − threshold·σ, μ + threshold·σ]
+   (default threshold = 2.5).
 
 The resulting `adjusted_value` column is modelled in parallel with the
-original `CS` column.  The optimiser independently finds the best ARIMA
+original `CS` column.  The optimiser independently finds the best SARIMA
 parameters for each, and the forecast with the lower combined metric score
 is selected as the final output.
 
 ---
 
-## 3. ARIMA Model
+## 2a. Outlier Treatment
 
-The forecasting model used is `ARIMA(p, d, q)`, a special case of SARIMA
-without seasonal components.
+### Why clipping is necessary
 
-| Parameter | Meaning                                        | Default search range |
-|-----------|------------------------------------------------|----------------------|
-| `p`       | Autoregressive order — number of lagged values | 0 – 6                |
-| `d`       | Integration order — number of differences      | 0 – 2                |
-| `q`       | Moving-average order — number of lagged errors | 0 – 6                |
+SARIMA models are sensitive to extreme values because their parameter
+estimates are derived from autocovariance calculations.  A single large
+spike — a one-off promotion, a data-entry error, or a supply disruption —
+can inflate variance estimates, shift the mean, and produce forecasts that
+overfit the anomaly rather than capturing the true demand pattern.  Pre-processing
+the series to dampen extreme values before fitting gives the model a cleaner
+signal to learn from.
+
+### Why ±1σ is too aggressive
+
+Clipping at ±1σ around the local mean is equivalent to treating any value
+in the upper or lower 16 % of a normal distribution as an outlier.
+Across the full series, a ±1σ rule clips approximately **32 % of all
+observations**.  In demand-planning contexts, this threshold is far too
+conservative: it routinely removes legitimate demand events such as
+promotional lifts, seasonal peaks (e.g. Q4 holiday demand), and new-product
+launch spikes.  Discarding these events distorts the estimated mean and
+variance, causing the model to systematically under-forecast periods with
+elevated demand.
+
+### Why 2.5σ is the recommended default
+
+A threshold of ±2.5σ retains **98.8 % of values** from a normal
+distribution, clipping only observations that are statistically extreme
+by a clear margin.  In practice, values beyond 2.5σ almost always represent
+genuine data quality issues (duplicate entries, unit-of-measure errors) or
+truly anomalous one-off events that should not be extrapolated into the
+forecast horizon.  The 2.5σ boundary strikes the right balance between
+robustness and signal preservation for monthly demand series.
+
+### Why IQR×1.5 (Tukey fences) is better for heavy-tailed distributions
+
+Many SKU-level demand series are far from normally distributed.  They
+frequently exhibit a high proportion of zero or near-zero periods
+interspersed with occasional large spikes — a pattern common in
+intermittent or lumpy demand.  For such series, σ-based clipping is
+unreliable because the standard deviation is inflated by the spikes it is
+supposed to remove, producing a circular dependency.  The interquartile
+range (IQR = Q3 − Q1) is a rank-based statistic unaffected by extreme
+values.  Tukey fences at Q1 − 1.5·IQR and Q3 + 1.5·IQR are the
+industry-standard choice for detecting outliers in heavy-tailed or
+non-symmetric distributions.
+
+**Practical recommendation**: use `method="sigma"` with `threshold=2.5` as
+the default for series with a coefficient of variation (CV = std/mean) below
+1.0.  Switch to `method="iqr"` with `threshold=1.5` for series with
+CV > 1.0 or series with a high proportion of zero periods, as these are
+most likely to have heavy-tailed distributions where σ-based clipping is
+unreliable.
+
+---
+
+## 2b. Seasonal Parameter Optimisation
+
+### Why m = 12 is fixed
+
+For monthly demand planning, the seasonal period `m = 12` corresponds to
+the annual cycle and is one of the most well-established empirical facts in
+retail and consumer-goods forecasting (M4 Competition, 2020).  Allowing the
+optimiser to search over `m` would conflate model selection with data-frequency
+assumptions and would dramatically expand the search space, adding very high-
+cardinality trials (e.g. `m = 6, 12, 24`) that are expensive to fit and
+unlikely to outperform `m = 12` on monthly series.  Fixing `m = 12` is the
+standard approach used in academic benchmarks, commercial forecasting platforms,
+and the ``auto.arima`` literature.
+
+### Why P and Q are worth searching
+
+The seasonal AR order `P` and seasonal MA order `Q` control how strongly the
+model uses lagged seasonal observations (P) and lagged seasonal forecast errors
+(Q) to predict the next period.  In demand planning, these components can
+meaningfully improve accuracy for SKUs with strong and regular seasonal patterns
+(e.g. a product that consistently sells more in December than in July).  Unlike
+varying `m`, searching over `P ∈ [0,2]` and `Q ∈ [0,2]` is computationally
+inexpensive: it adds only a 3 × 3 = 9-element sub-grid per trial, and the
+complexity constraints `(P+Q) ≤ 3` ensure that over-parameterised seasonal
+components are pruned cheaply before fitting.
+
+### Why D ∈ [0, 1] is sufficient
+
+Seasonal differencing with order `D = 1` removes deterministic seasonal trends
+(e.g. a steadily growing Q4 peak year-over-year).  `D = 2` would apply
+seasonal differencing twice, which is rarely needed for monthly demand data and
+substantially increases the minimum series length required for a stable fit.
+The search space `D ∈ [0,1]` covers the practically relevant range without
+the risk of over-differencing.
+
+### Complexity constraints
+
+Two hard constraints are enforced inside the Optuna objective function before
+any model is fitted:
+
+| Constraint | Rationale |
+|------------|-----------|
+| `(p + q) ≤ 4` | Prevents ARMA overfitting on the non-seasonal component.  An ARIMA(3,d,3) already has six free parameters on top of the differencing order; adding more rarely improves generalisation. |
+| `(P + Q) ≤ 3` | Keeps the seasonal component parsimonious.  SARIMA(P=2,D,Q=2) with M=12 requires the model to estimate four lags 12 months apart; beyond `P+Q=3` the fit typically deteriorates on series shorter than 60 months. |
+
+Both constraints return :data:`~sarima_bayes.optimizer.OPTIMIZER_PENALTY`
+(``1e6``) immediately, so the TPE sampler learns to steer away from
+over-parameterised regions without wasting a full model-fitting evaluation.
+
+---
+
+## 3. SARIMA Model
+
+The forecasting model used is `SARIMA(p, d, q)(P, D, Q, m)` — a Seasonal
+ARIMA model that explicitly captures both short-term autocorrelation and
+annual seasonal patterns.
+
+| Parameter | Meaning                                                     | Search range |
+|-----------|-------------------------------------------------------------|--------------|
+| `p`       | Autoregressive order — number of lagged values              | 0 – 3        |
+| `d`       | Integration order — number of non-seasonal differences      | 0 – 2        |
+| `q`       | Moving-average order — number of lagged forecast errors     | 0 – 3        |
+| `P`       | Seasonal AR order — lagged values at multiples of m         | 0 – 2        |
+| `D`       | Seasonal differencing order                                 | 0 – 1        |
+| `Q`       | Seasonal MA order — lagged seasonal forecast errors         | 0 – 2        |
+| `m`       | Seasonal period — **fixed at 12** (monthly annual cycle)    | —            |
 
 The model is implemented via `statsmodels.tsa.statespace.sarimax.SARIMAX`
 with `enforce_stationarity=False` and `enforce_invertibility=False`.  These
@@ -90,11 +203,6 @@ failures on numerically challenging combinations; the cost function
 naturally penalises unstable fits.
 
 Forecasts are clipped to zero from below (demand cannot be negative).
-
-> **Note on seasonality**: Seasonal ARIMA components `(P, D, Q, s)` are
-> intentionally omitted.  Monthly seasonality is handled implicitly by
-> choosing an appropriate `p` order.  Seasonal components can be activated
-> by passing a non-`None` `s_order` tuple to `model.pred_arima`.
 
 ---
 
