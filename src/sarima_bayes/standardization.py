@@ -27,6 +27,7 @@ import pandas as pd
 
 def clip_outliers(
     series: pd.Series,
+    method: str = "sigma",
     window: int = 6,
     sigma_threshold: float = 2.5,
 ) -> pd.Series:
