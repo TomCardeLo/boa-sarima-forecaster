@@ -29,19 +29,19 @@ def clip_outliers(
     series: pd.Series,
     method: str = "sigma",
     window: int = 6,
-    sigma_threshold: float = 2.5,
+    threshold: float = 2.5,
 ) -> pd.Series:
     """Clip outliers from a time series using global statistics.
 
     Args:
         series: Raw demand series.
         window: Rolling window size for moving average.
-        sigma_threshold: Number of standard deviations for clipping bounds.
+        threshold: Number of standard deviations for clipping bounds.
             Default 2.5. Values below 2.0 risk clipping legitimate demand
             spikes from promotions or seasonal events.
 
     Returns:
-        Series with outliers clipped to ±sigma_threshold of the local mean.
+        Series with outliers clipped to ±threshold of the local mean.
 
     Raises:
         ValueError: If ``method`` is not ``"sigma"`` or ``"iqr"``.
@@ -63,14 +63,14 @@ def clip_outliers(
     if method == "sigma":
         mu = series.mean()
         sigma = series.std(ddof=1)
-        lower = mu - sigma_threshold * sigma
-        upper = mu + sigma_threshold * sigma
+        lower = mu - threshold * sigma
+        upper = mu + threshold * sigma
     elif method == "iqr":
         q1 = series.quantile(0.25)
         q3 = series.quantile(0.75)
         iqr = q3 - q1
-        lower = q1 - sigma_threshold * iqr
-        upper = q3 + sigma_threshold * iqr
+        lower = q1 - threshold * iqr
+        upper = q3 + threshold * iqr
     else:
         raise ValueError(
             f"clip_outliers: unknown method '{method}'. " "Choose 'sigma' or 'iqr'."
