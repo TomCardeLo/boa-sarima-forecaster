@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] — 2026-03-23
+
+### Added
+
+- **Configurable outlier-clipping threshold** — `clip_outliers` and
+  `weighted_moving_stats` now accept a `threshold` parameter (default `2.5`).
+  Previously the σ multiplier was hard-coded to `2.5`; it can now be set per-call
+  or globally via `config.yaml` under `standardization.threshold`.
+
+### Changed
+
+- `config.example.yaml` — added `standardization.threshold: 2.5` key so users can
+  tune sensitivity without touching source code.
+- `docs/methodology.md` — updated standardisation section to document the new parameter.
+
+### Fixed
+
+- Renamed internal parameter `sigma_threshold` → `threshold` in `clip_outliers` to
+  match the public API expected by the test suite.
+- Resolved ruff lint errors (`UP` and `E` rules) and applied black auto-formatting
+  to `config.py` that were blocking CI on the feature branch.
+
+[1.1.0]: https://github.com/TomCardeLo/boa-sarima-forecaster/compare/v1.0.0...v1.1.0
+
+---
+
 ## [1.0.0] — 2026-03-17
 
 ### Added
