@@ -80,6 +80,33 @@ standardization:
   window: 6
   sigma_threshold: 2.5  # ±Nσ clipping. Use 1.0-2.0 for clean data, 2.5-3.0 for promo-heavy series
 
+# ── Metrics ────────────────────────────────────────────────────────────────────
+metrics:
+  # Weighted objective minimised by the Bayesian optimiser.
+  # Each component specifies a registered metric name and its scalar weight.
+  # Available metrics: smape, rmsle, mae, rmse, mape
+  # Weights do not need to sum to 1 but it is recommended for interpretability.
+  #
+  # Default — demand forecasting profile (relative accuracy + log-scale stability):
+  components:
+    - metric: smape
+      weight: 0.7
+    - metric: rmsle
+      weight: 0.3
+  #
+  # Alternative examples:
+  #   Revenue / price forecasting (absolute scale matters):
+  #     components:
+  #       - metric: mae
+  #         weight: 0.6
+  #       - metric: rmse
+  #         weight: 0.4
+  #
+  #   Pure percentage accuracy:
+  #     components:
+  #       - metric: mape
+  #         weight: 1.0
+
 # ── Forecast ──────────────────────────────────────────────────────────────────
 forecast:
   # Number of months to forecast into the future.

@@ -1,9 +1,11 @@
 """Bayesian Optimisation for SARIMA hyper-parameter search.
 
 This module uses Optuna's Tree-structured Parzen Estimator (TPE) to search
-the integer space of ``SARIMA(p, d, q)(P, D, Q, m)`` orders, minimising the
-combined cost function (0.7 * sMAPE + 0.3 * RMSLE) computed on in-sample
-predictions.
+the integer space of ``SARIMA(p, d, q)(P, D, Q, m)`` orders, minimising a
+configurable weighted metric computed on in-sample predictions.  The default
+objective is ``0.7 * sMAPE + 0.3 * RMSLE``; any combination of metrics
+registered in ``sarima_bayes.metrics.METRIC_REGISTRY`` can be substituted
+via the ``metric_components`` argument or ``config.yaml``.
 
 Design decisions
 ----------------
@@ -27,6 +29,7 @@ from __future__ import annotations
 import logging
 import os
 import warnings as _warnings
+from typing import Callable
 
 import numpy as np
 import optuna
@@ -36,13 +39,14 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 from sarima_bayes.config import (
     DEFAULT_D_RANGE,
     DEFAULT_D_SEASONAL_RANGE,
+    DEFAULT_METRIC_COMPONENTS,
     DEFAULT_P_RANGE,
     DEFAULT_P_SEASONAL_RANGE,
     DEFAULT_Q_RANGE,
     DEFAULT_Q_SEASONAL_RANGE,
     DEFAULT_SEASONAL_PERIOD,
 )
-from sarima_bayes.metrics import combined_metric
+from sarima_bayes.metrics import build_combined_metric
 
 # Suppress Optuna's internal progress logs and experimental warnings
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -66,8 +70,9 @@ def _evaluate_arima(
     D: int = 0,
     Q: int = 0,
     m: int = DEFAULT_SEASONAL_PERIOD,
+    metric_fn: Callable[[np.ndarray, np.ndarray], float] | None = None,
 ) -> tuple[int, int, int, float, str | None]:
-    """Fit ``SARIMA(p,d,q)(P,D,Q,m)`` and compute the in-sample combined metric.
+    """Fit ``SARIMA(p,d,q)(P,D,Q,m)`` and compute the in-sample metric score.
 
     This function is the atomic evaluation unit called by the Optuna objective.
     On any exception it returns ``OPTIMIZER_PENALTY`` so the optimiser can
@@ -83,11 +88,17 @@ def _evaluate_arima(
         Q: Seasonal moving-average order.
         m: Seasonal period (fixed, not optimised).  Defaults to
             ``DEFAULT_SEASONAL_PERIOD``.
+        metric_fn: Callable ``(y_true, y_pred) -> float`` used to score
+            in-sample predictions.  Defaults to the standard combined
+            metric built from ``DEFAULT_METRIC_COMPONENTS``.
 
     Returns:
         Tuple ``(p, d, q, score, error_message)`` where ``error_message``
         is ``None`` on success or a string describing the exception.
     """
+    if metric_fn is None:
+        metric_fn = build_combined_metric(DEFAULT_METRIC_COMPONENTS)
+
     try:
         # enforce_stationarity / enforce_invertibility = False allows the
         # optimiser to test parameters that may violate strict stationarity
@@ -103,7 +114,7 @@ def _evaluate_arima(
 
         # In-sample predictions: assess goodness-of-fit on historical data
         pred = model_fit.predict(start=0, end=len(series) - 1)
-        score = combined_metric(series, pred)
+        score = metric_fn(series, pred)
 
         return (p, d, q, score, None)
 
@@ -123,11 +134,13 @@ def optimize_arima(
     m: int = DEFAULT_SEASONAL_PERIOD,
     n_calls: int = 50,
     n_jobs: int = 1,
+    metric_components: list[dict] | None = None,
 ) -> tuple[dict[str, int], float]:
     """Search for optimal ``SARIMA(p,d,q)(P,D,Q,m)`` orders using Optuna TPE.
 
-    Minimises the combined metric (0.7 * sMAPE + 0.3 * RMSLE) computed on
-    in-sample predictions.
+    Minimises a configurable weighted metric computed on in-sample predictions.
+    The default objective is ``0.7 * sMAPE + 0.3 * RMSLE`` (demand-forecasting
+    profile).  Pass ``metric_components`` to substitute a different objective.
 
     The study is pre-seeded with two warm-start trials before the TPE
     surrogate model takes over:
@@ -169,6 +182,10 @@ def optimize_arima(
         n_calls: Total number of Optuna trials. Defaults to ``50``.
         n_jobs: Number of parallel Optuna workers. Use ``-1`` to
             auto-detect CPU cores. Defaults to ``1``.
+        metric_components: List of ``{"metric": str, "weight": float}`` dicts
+            defining the optimisation objective.  Each metric name must be
+            present in ``sarima_bayes.metrics.METRIC_REGISTRY``.  Defaults to
+            ``DEFAULT_METRIC_COMPONENTS`` (``0.7 * sMAPE + 0.3 * RMSLE``).
 
     Returns:
         Tuple ``(best_params, best_value)`` where ``best_params`` is a dict
@@ -190,8 +207,16 @@ def optimize_arima(
     if n_jobs is None or n_jobs < 1:
         n_jobs = os.cpu_count() or 1
 
+    # Build the metric callable once; reused by every Optuna trial
+    components = (
+        metric_components
+        if metric_components is not None
+        else DEFAULT_METRIC_COMPONENTS
+    )
+    metric_fn = build_combined_metric(components)
+
     def objective(trial: optuna.Trial) -> float:
-        """Optuna objective: suggest (p,d,q,P,D,Q) and return combined cost."""
+        """Optuna objective: suggest (p,d,q,P,D,Q) and return metric score."""
         p = trial.suggest_int("p", p_range[0], p_range[1])
         d = trial.suggest_int("d", d_range[0], d_range[1])
         q = trial.suggest_int("q", q_range[0], q_range[1])
@@ -206,7 +231,7 @@ def optimize_arima(
         if (P + Q) > 3:
             return OPTIMIZER_PENALTY
 
-        _, _, _, score, _ = _evaluate_arima(series, p, d, q, P, D, Q, m)
+        _, _, _, score, _ = _evaluate_arima(series, p, d, q, P, D, Q, m, metric_fn)
         return score
 
     # ── Sampler ────────────────────────────────────────────────────────────────

@@ -20,7 +20,8 @@ preprocessor
 standardization
     Weighted moving-average smoother and outlier clipping.
 metrics
-    sMAPE, RMSLE, and the combined cost function used by the optimiser.
+    sMAPE, RMSLE, MAE, RMSE, MAPE, metric registry, and the combined cost
+    function factory used by the optimiser.
 optimizer
     Bayesian Optimisation (Optuna TPE) for ARIMA order search.
 model
@@ -28,7 +29,16 @@ model
 """
 
 from sarima_bayes.benchmarks import run_benchmark_comparison, summary_table
-from sarima_bayes.metrics import combined_metric, rmsle, smape
+from sarima_bayes.metrics import (
+    METRIC_REGISTRY,
+    build_combined_metric,
+    combined_metric,
+    mae,
+    mape,
+    rmse,
+    rmsle,
+    smape,
+)
 from sarima_bayes.model import forecast_arima, pred_arima
 from sarima_bayes.optimizer import optimize_arima
 from sarima_bayes.validation import validate_by_group, walk_forward_validation
@@ -38,8 +48,13 @@ __all__ = [
     "forecast_arima",
     "pred_arima",
     "combined_metric",
+    "build_combined_metric",
+    "METRIC_REGISTRY",
     "smape",
     "rmsle",
+    "mae",
+    "rmse",
+    "mape",
     "walk_forward_validation",
     "validate_by_group",
     "run_benchmark_comparison",
