@@ -28,12 +28,13 @@ def pred_arima(
     s_order: tuple[int, int, int, int] | None = None,
     n_per: int = 12,
     alpha: float = 0.05,
+    freq: str = "MS",
 ) -> tuple[pd.DataFrame, pd.DataFrame | None, tuple, tuple | None, pd.Series | None]:
     """Fit a SARIMA model and produce a multi-step forecast.
 
-    This is the core forecasting engine.  The series index is set to
-    month-start frequency (``"MS"``) before fitting so that statsmodels
-    generates properly date-indexed forecasts.
+    This is the core forecasting engine.  The series index is set to the
+    specified ``freq`` before fitting so that statsmodels generates properly
+    date-indexed forecasts.
 
     ``enforce_stationarity=False`` and ``enforce_invertibility=False`` are
     deliberately set so that the Bayesian optimiser can probe the full
@@ -49,10 +50,14 @@ def pred_arima(
         order: ARIMA non-seasonal order ``(p, d, q)``.
         s_order: SARIMA seasonal order ``(P, D, Q, s)``.  Pass ``None``
             to fit a plain ARIMA model.  Defaults to ``None``.
-        n_per: Number of forecast periods (months) to generate ahead.
+        n_per: Number of forecast periods to generate ahead.
             Defaults to ``12``.
         alpha: Significance level for confidence intervals.
             Defaults to ``0.05`` (95 % CI).
+        freq: Pandas DateOffset alias used to set the series frequency before
+            fitting (e.g. ``"MS"``, ``"W"``, ``"D"``, ``"h"``).
+            Must match the actual sampling rate of the input data.
+            Defaults to ``"MS"`` (month start).
 
     Returns:
         5-tuple ``(forecast_df, conf_int, order, s_order, forecast_series)``
@@ -77,7 +82,7 @@ def pred_arima(
     """
     try:
         # Set temporal index so statsmodels produces date-indexed forecasts
-        series = bd.set_index(col_x)[col_y].asfreq("MS")
+        series = bd.set_index(col_x)[col_y].asfreq(freq)
 
         # NOTE: enforce_stationarity / enforce_invertibility = False allows the
         # Bayesian optimiser to test edge-case parameter combinations without
@@ -126,6 +131,7 @@ def forecast_arima(
     D: int = 0,
     Q: int = 0,
     m: int | None = None,
+    freq: str = "MS",
 ) -> pd.DataFrame:
     """Fit SARIMA and return a tidy forecast DataFrame (no Forecast group).
 
@@ -147,6 +153,8 @@ def forecast_arima(
         Q: Seasonal MA order.  Defaults to ``0``.
         m: Seasonal period.  Pass ``None`` to fit a non-seasonal ARIMA
             (equivalent to ``P=D=Q=0``).  Defaults to ``None``.
+        freq: Pandas DateOffset alias for the series sampling frequency.
+            Defaults to ``"MS"`` (month start).
 
     Returns:
         DataFrame with columns ``["Date", "Pred", "Country", "Sku"]``.
@@ -166,6 +174,7 @@ def forecast_arima(
             order=(p, d, q),
             s_order=s_order,
             n_per=n_per,
+            freq=freq,
         )
 
         if forecast_df.empty:
@@ -203,6 +212,7 @@ def forecast_arima_with_group(
     D: int = 0,
     Q: int = 0,
     m: int | None = None,
+    freq: str = "MS",
 ) -> pd.DataFrame:
     """Fit SARIMA and return a tidy forecast DataFrame (with Forecast group).
 
@@ -227,6 +237,8 @@ def forecast_arima_with_group(
         Q: Seasonal MA order.  Defaults to ``0``.
         m: Seasonal period.  Pass ``None`` to fit a non-seasonal ARIMA.
             Defaults to ``None``.
+        freq: Pandas DateOffset alias for the series sampling frequency.
+            Defaults to ``"MS"`` (month start).
 
     Returns:
         DataFrame with columns
@@ -249,6 +261,7 @@ def forecast_arima_with_group(
             order=(p, d, q),
             s_order=s_order,
             n_per=n_per,
+            freq=freq,
         )
 
         if forecast_df.empty:

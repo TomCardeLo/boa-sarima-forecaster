@@ -119,6 +119,7 @@ def validate_by_group(
     target_col: str,
     date_col: str,
     model_fn: Callable[[pd.Series], pd.Series],
+    freq: str = "MS",
     **kwargs,
 ) -> pd.DataFrame:
     """Run walk-forward validation for every group in *df*.
@@ -129,8 +130,11 @@ def validate_by_group(
         group_cols: Columns used to identify each individual series
             (e.g. ``["Country", "SKU"]``).
         target_col: Name of the column holding the target variable.
-        date_col: Name of the date column (must be parseable as monthly dates).
+        date_col: Name of the date column (must be parseable as datetime).
         model_fn: Passed unchanged to ``walk_forward_validation()``.
+        freq: Pandas DateOffset alias used to assign the index frequency
+            before passing each group's series to ``walk_forward_validation``.
+            Defaults to ``"MS"`` (month start).
         **kwargs: Extra keyword arguments forwarded to
             ``walk_forward_validation()`` — ``n_folds``, ``test_size``,
             ``min_train_size``, ``metrics_fn``.
@@ -161,7 +165,7 @@ def validate_by_group(
                 group_df_sorted[target_col].values,
                 index=index,
             )
-            series.index.freq = pd.tseries.frequencies.to_offset("MS")
+            series.index.freq = pd.tseries.frequencies.to_offset(freq)
 
             fold_df = walk_forward_validation(series, model_fn, **kwargs)
 

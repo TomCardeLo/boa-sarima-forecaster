@@ -72,7 +72,7 @@ def seasonal_naive(
     return pd.Series(values, index=future_index, dtype=float)
 
 
-def ets_model(train: pd.Series, forecast_horizon: int) -> pd.Series:
+def ets_model(train: pd.Series, forecast_horizon: int, m: int = 12) -> pd.Series:
     """Holt-Winters additive ETS model via statsmodels.
 
     Falls back to ``seasonal_naive()`` on any exception (e.g. series too
@@ -81,6 +81,8 @@ def ets_model(train: pd.Series, forecast_horizon: int) -> pd.Series:
     Args:
         train: Historical series with a ``pd.DatetimeIndex``.
         forecast_horizon: Number of steps to forecast.
+        m: Seasonal period for Holt-Winters decomposition.
+            Defaults to ``12`` (monthly data, annual cycle).
 
     Returns:
         Forecast Series of length ``forecast_horizon``.
@@ -97,23 +99,28 @@ def ets_model(train: pd.Series, forecast_horizon: int) -> pd.Series:
             train,
             trend="add",
             seasonal="add",
-            seasonal_periods=12,
+            seasonal_periods=m,
         ).fit(optimized=True)
         forecast = model.forecast(forecast_horizon)
 
-        freq = train.index.freq or "MS"
+        _freq = train.index.freq or "MS"
         future_index = pd.date_range(
             start=train.index[-1],
             periods=forecast_horizon + 1,
-            freq=freq,
+            freq=_freq,
         )[1:]
         return pd.Series(forecast.values, index=future_index, dtype=float)
     except Exception as exc:  # noqa: BLE001
         logger.warning("ets_model failed (%s); falling back to seasonal_naive.", exc)
-        return seasonal_naive(train, forecast_horizon)
+        return seasonal_naive(train, forecast_horizon, m=m)
 
 
-def auto_arima_nixtla(train: pd.Series, forecast_horizon: int) -> pd.Series:
+def auto_arima_nixtla(
+    train: pd.Series,
+    forecast_horizon: int,
+    m: int = 12,
+    freq: str = "MS",
+) -> pd.Series:
     """AutoARIMA via the statsforecast (Nixtla) library.
 
     Falls back to ``seasonal_naive()`` on any exception (e.g. if
@@ -122,6 +129,10 @@ def auto_arima_nixtla(train: pd.Series, forecast_horizon: int) -> pd.Series:
     Args:
         train: Historical series with a ``pd.DatetimeIndex``.
         forecast_horizon: Number of steps to forecast.
+        m: Seasonal period passed to ``AutoARIMA``.
+            Defaults to ``12`` (monthly data, annual cycle).
+        freq: Pandas DateOffset alias passed to ``StatsForecast``.
+            Defaults to ``"MS"`` (month start).
 
     Returns:
         Forecast Series of length ``forecast_horizon``.
@@ -131,11 +142,12 @@ def auto_arima_nixtla(train: pd.Series, forecast_horizon: int) -> pd.Series:
         >>> len(forecast)
         6
     """
-    freq = train.index.freq or "MS"
+    # Prefer the freq carried by the series index; fall back to the parameter.
+    _freq = train.index.freq or freq
     future_index = pd.date_range(
         start=train.index[-1],
         periods=forecast_horizon + 1,
-        freq=freq,
+        freq=_freq,
     )[1:]
 
     try:
@@ -150,7 +162,7 @@ def auto_arima_nixtla(train: pd.Series, forecast_horizon: int) -> pd.Series:
             }
         )
 
-        sf = StatsForecast(models=[AutoARIMA(season_length=12)], freq="MS")
+        sf = StatsForecast(models=[AutoARIMA(season_length=m)], freq=freq)
         predictions = sf.forecast(df=sf_df, h=forecast_horizon)
 
         return pd.Series(
@@ -162,7 +174,7 @@ def auto_arima_nixtla(train: pd.Series, forecast_horizon: int) -> pd.Series:
         logger.warning(
             "auto_arima_nixtla failed (%s); falling back to seasonal_naive.", exc
         )
-        return seasonal_naive(train, forecast_horizon)
+        return seasonal_naive(train, forecast_horizon, m=m)
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +191,8 @@ def run_benchmark_comparison(
     n_folds: int = 3,
     test_size: int = 12,
     min_train_size: int = 24,
+    m: int = 12,
+    freq: str = "MS",
 ) -> pd.DataFrame:
     """Compare SARIMA+BO against seasonal naïve, ETS, and AutoARIMA.
 
@@ -195,6 +209,11 @@ def run_benchmark_comparison(
         n_folds: Number of walk-forward folds (passed to validation).
         test_size: Length of each test window.
         min_train_size: Minimum initial training size.
+        m: Seasonal period forwarded to ``ets_model`` and
+            ``auto_arima_nixtla``.  Defaults to ``12``.
+        freq: Pandas DateOffset alias forwarded to ``auto_arima_nixtla``
+            and used to set the series index frequency.
+            Defaults to ``"MS"`` (month start).
 
     Returns:
         DataFrame with columns:
@@ -213,9 +232,9 @@ def run_benchmark_comparison(
     """
     models: dict[str, Callable[[pd.Series], pd.Series]] = {
         "SARIMA+BO": sarima_model_fn,
-        "seasonal_naive": lambda t: seasonal_naive(t, test_size),
-        "ETS": lambda t: ets_model(t, test_size),
-        "AutoARIMA": lambda t: auto_arima_nixtla(t, test_size),
+        "seasonal_naive": lambda t: seasonal_naive(t, test_size, m=m),
+        "ETS": lambda t: ets_model(t, test_size, m=m),
+        "AutoARIMA": lambda t: auto_arima_nixtla(t, test_size, m=m, freq=freq),
     }
 
     all_rows: list[pd.DataFrame] = []
@@ -227,7 +246,7 @@ def run_benchmark_comparison(
             group_df_sorted[target_col].values,
             index=index,
         )
-        series.index.freq = pd.tseries.frequencies.to_offset("MS")
+        series.index.freq = pd.tseries.frequencies.to_offset(freq)
 
         for model_name, fn in models.items():
             try:

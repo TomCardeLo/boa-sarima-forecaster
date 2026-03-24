@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sarima_bayes.validation import walk_forward_validation
+from sarima_bayes.validation import validate_by_group, walk_forward_validation
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -130,3 +130,91 @@ class TestWalkForwardValidation:
             min_train_size=24,
         )
         assert result["sMAPE"].isna().all()
+
+
+# ---------------------------------------------------------------------------
+# Tests for validate_by_group (previously uncovered)
+# ---------------------------------------------------------------------------
+
+
+def _make_monthly_df(n_skus: int = 2, n_periods: int = 60) -> pd.DataFrame:
+    rng = np.random.default_rng(99)
+    rows = []
+    for sku in range(1, n_skus + 1):
+        dates = pd.date_range("2019-01-01", periods=n_periods, freq="MS")
+        values = 100.0 + rng.normal(0, 2, n_periods)
+        for d, v in zip(dates, values):
+            rows.append({"SKU": sku, "Date": d, "CS": float(v)})
+    return pd.DataFrame(rows)
+
+
+def _naive_group_fn(train: pd.Series) -> pd.Series:
+    """Return a constant forecast of length 6 starting after the last training obs."""
+    _f = train.index.freq or "MS"
+    idx = pd.date_range(start=train.index[-1], periods=7, freq=_f)[1:]
+    return pd.Series([train.iloc[-1]] * 6, index=idx)
+
+
+class TestValidateByGroup:
+    """validate_by_group was previously untested; these are the first coverage tests."""
+
+    def test_returns_correct_row_count(self):
+        df = _make_monthly_df(n_skus=2)
+        result = validate_by_group(
+            df,
+            group_cols=["SKU"],
+            target_col="CS",
+            date_col="Date",
+            model_fn=_naive_group_fn,
+            freq="MS",
+            n_folds=3,
+            test_size=6,
+            min_train_size=24,
+        )
+        # 2 groups × 3 folds = 6 rows
+        assert len(result) == 6
+
+    def test_group_col_present_in_output(self):
+        df = _make_monthly_df(n_skus=2)
+        result = validate_by_group(
+            df,
+            group_cols=["SKU"],
+            target_col="CS",
+            date_col="Date",
+            model_fn=_naive_group_fn,
+            freq="MS",
+            n_folds=3,
+            test_size=6,
+            min_train_size=24,
+        )
+        assert "SKU" in result.columns
+
+    def test_default_freq_unchanged(self):
+        # Calling without freq= must default to "MS" and not raise.
+        df = _make_monthly_df(n_skus=1)
+        result = validate_by_group(
+            df,
+            group_cols=["SKU"],
+            target_col="CS",
+            date_col="Date",
+            model_fn=_naive_group_fn,
+            n_folds=3,
+            test_size=6,
+            min_train_size=24,
+        )
+        assert len(result) == 3
+
+    def test_metric_columns_present(self):
+        df = _make_monthly_df(n_skus=1)
+        result = validate_by_group(
+            df,
+            group_cols=["SKU"],
+            target_col="CS",
+            date_col="Date",
+            model_fn=_naive_group_fn,
+            freq="MS",
+            n_folds=3,
+            test_size=6,
+            min_train_size=24,
+        )
+        assert {"sMAPE", "RMSLE"}.issubset(result.columns)
