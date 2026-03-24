@@ -19,6 +19,63 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+def _freq_to_period_alias(freq: str) -> str:
+    """Map a pandas DateOffset alias to a pandas Period alias.
+
+    ``pd.Series.dt.to_period()`` requires a Period alias (e.g. ``"M"``)
+    rather than a DateOffset alias (e.g. ``"MS"``).  This helper performs
+    the translation for the frequency values the library supports.
+
+    Args:
+        freq: Pandas DateOffset alias string (e.g. ``"MS"``, ``"W"``, ``"D"``).
+
+    Returns:
+        Corresponding pandas Period alias string (e.g. ``"M"``, ``"W"``, ``"D"``).
+
+    Raises:
+        ValueError: If ``freq`` has no known Period alias mapping.
+
+    Example:
+        >>> _freq_to_period_alias("MS")
+        'M'
+        >>> _freq_to_period_alias("W")
+        'W'
+    """
+    _MAP: dict[str, str] = {
+        # Monthly
+        "MS": "M",
+        "ME": "M",
+        "M": "M",
+        # Quarterly
+        "QS": "Q",
+        "QE": "Q",
+        "Q": "Q",
+        # Annual
+        "YS": "Y",
+        "YE": "Y",
+        "Y": "Y",
+        "AS": "Y",
+        "A": "Y",
+        # Weekly
+        "W": "W",
+        # Daily
+        "D": "D",
+        # Hourly (pandas 2.x uses lowercase "h")
+        "H": "h",
+        "h": "h",
+        # Minutely (pandas 2.x uses "min")
+        "T": "min",
+        "min": "min",
+    }
+    try:
+        return _MAP[freq]
+    except KeyError:
+        raise ValueError(
+            f"Cannot map DateOffset alias {freq!r} to a Period alias. "
+            f"Supported aliases: {sorted(_MAP)}"
+        )
+
+
 def clean_zeros(
     df: pd.DataFrame,
     group_cols: list[str] | None = None,
@@ -97,12 +154,20 @@ def fill_blanks(
         group_cols = ["SKU"]
 
     df = df.copy()
-    # Normalise all dates to period start so "2022-01-15" and "2022-01-01"
-    # land in the same monthly bucket before reindexing.
-    df[date_col] = pd.to_datetime(df[date_col]).dt.to_period("M").dt.to_timestamp()
+    period_alias = _freq_to_period_alias(freq)
+    # "W" (weekly) periods use end-of-period convention (Sunday) to match the
+    # anchoring of pd.date_range(freq="W").  All other periods use start ("S").
+    period_how = "E" if period_alias == "W" else "S"
+    # Normalise all dates to the canonical period boundary so mid-period
+    # timestamps (e.g. "2022-01-15") land in the correct bucket before reindexing.
+    df[date_col] = (
+        pd.to_datetime(df[date_col])
+        .dt.to_period(period_alias)
+        .dt.to_timestamp(how=period_how)
+    )
 
     target_end = (
-        pd.to_datetime(end_date).to_period("M").to_timestamp()
+        pd.to_datetime(end_date).to_period(period_alias).to_timestamp(how=period_how)
         if end_date
         else df[date_col].max()
     )
