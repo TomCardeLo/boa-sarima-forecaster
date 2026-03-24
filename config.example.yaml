@@ -9,11 +9,9 @@
 data:
   # Path to the input Excel workbook (relative or absolute).
   # See docs/methodology.md for the expected column structure.
+  # Required columns: Date, CS
+  # Optional columns (auto-defaulted if absent): SKU (→ 1), Country (→ "_")
   input_path: "data/input/sales.xlsx"
-
-  # Optional: path to the representative-SKU mapping workbook.
-  # Remove this key if you do not use the merge_representatives step.
-  representatives_path: "data/input/representatives.xlsx"
 
   # Name of the worksheet containing the time-series data.
   sheet_name: "Data"

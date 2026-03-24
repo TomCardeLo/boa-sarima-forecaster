@@ -16,7 +16,7 @@ config
 data_loader
     Excel ingestion and minimal data cleaning.
 preprocessor
-    Missing-date fill, zero-series removal, and representative-SKU consolidation.
+    Missing-date fill and zero-series removal.
 standardization
     Weighted moving-average smoother and outlier clipping.
 metrics
