@@ -1,6 +1,6 @@
 # boa-sarima-forecaster
 
-> Monthly demand forecasting using ARIMA + Bayesian Optimisation (Optuna TPE)
+> Demand forecasting at any frequency using ARIMA + Bayesian Optimisation (Optuna TPE)
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -51,7 +51,7 @@ The pipeline consists of five stages:
 
 ### 1 — Data Preparation
 
-Raw monthly sales data is loaded from Excel (see [Input Data Format](#input-data-format)),
+Raw sales data is loaded from Excel (see [Input Data Format](#input-data-format)),
 cleaned (NaN fill, invalid-row removal, date parsing), and preprocessed
 (zero-series removal, missing-month fill, optional representative-SKU
 consolidation).
@@ -221,6 +221,7 @@ result = forecast_arima(
     n_per=12,
     country="US",
     sku=1001,
+    freq="MS",   # "W" for weekly, "D" for daily, "h" for hourly
 )
 print(result)
 ```
@@ -287,6 +288,11 @@ data:
   skip_rows:   2
   date_format: "%Y%m"
   end_date:    "2026-01-01"
+  freq:        "MS"   # pandas offset alias — see table below
+
+model:
+  sarima:
+    seasonal_period: 12   # must match the seasonality cycle for your freq
 
 optimization:
   p_range: [0, 6]
@@ -303,6 +309,20 @@ output:
   output_path: "data/output/"
   run_id:      "RUN-2025-01"
 ```
+
+### Supported frequencies
+
+| `freq` | Sampling rate | Recommended `seasonal_period` |
+|--------|--------------|-------------------------------|
+| `"MS"` | Monthly (default) | `12` — annual cycle |
+| `"W"`  | Weekly  | `52` — annual cycle, `4` — monthly cycle |
+| `"D"`  | Daily   | `7` — weekly cycle, `365` — annual cycle |
+| `"h"`  | Hourly  | `24` — daily cycle, `168` — weekly cycle |
+| `"QS"` | Quarterly | `4` — annual cycle |
+
+> When you change `freq`, always update `seasonal_period` to match the
+> seasonality cycle you care about — the two are intentionally decoupled
+> so you can model weekly seasonality on daily data (`freq="D"`, `m=7`).
 
 All constants also have Python-level defaults in `src/sarima_bayes/config.py`.
 
