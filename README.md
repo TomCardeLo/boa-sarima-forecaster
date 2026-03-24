@@ -43,6 +43,7 @@ production-ready pipeline that:
 - Handles intermittent demand, trend, and mild seasonality.
 - Clips outliers via a weighted moving-average smoother.
 - Scales to hundreds of SKUs via parallel execution.
+- Works with a single time series (no SKU / Country columns required).
 
 ---
 
@@ -244,20 +245,22 @@ print(result)
 
 > If your file has no extra header rows, set `skip_rows: 0` in `config.yaml`.
 
-#### Minimum required columns
+#### Required columns
 
-| Column    | Type    | Format                                                        |
-|-----------|---------|---------------------------------------------------------------|
-| `Date`    | string  | `YYYYMM` — e.g. `"202201"` = January 2022                   |
-| `SKU`     | integer | Numeric product identifier                                    |
-| `CS`      | float   | Sales volume (units, cases, or any numeric demand measure)    |
-| `Country` | string  | Market / region code (e.g. `"US"`, `"MX"`)                  |
+| Column | Type   | Format                                                      |
+|--------|--------|-------------------------------------------------------------|
+| `Date` | string | `YYYYMM` — e.g. `"202201"` = January 2022                 |
+| `CS`   | float  | Target variable (units, cases, revenue, or any numeric measure) |
 
 #### Optional columns
 
-| Column           | Type   | Description                                       |
-|------------------|--------|---------------------------------------------------|
-| `Forecast group` | string | Channel / distribution segment for split forecasts |
+| Column           | Type    | Default | Description                                       |
+|------------------|---------|---------|---------------------------------------------------|
+| `SKU`            | integer | `1`     | Series identifier — omit for single-series use    |
+| `Country`        | string  | `"_"`   | Market / region code (e.g. `"US"`, `"MX"`)       |
+| `Forecast group` | string  | —       | Channel / distribution segment for split forecasts |
+
+> `SKU` and `Country` are **auto-injected** with their default values if the columns are not present in the file.
 
 **Sample rows (as they appear in the spreadsheet):**
 
@@ -270,11 +273,6 @@ Date     | SKU  | CS    | Country
 202201   | 1002 | 195.0 | US
 202201   | 1001 |  78.0 | MX
 ```
-
-### Representative mapping (`data/input/representatives.xlsx`)
-
-Optional file used to consolidate child SKUs under a parent representative
-SKU.  Required columns: `Country`, `SKU`, `To SKU`.
 
 See [`data/README.md`](data/README.md) for the full data format reference.
 
