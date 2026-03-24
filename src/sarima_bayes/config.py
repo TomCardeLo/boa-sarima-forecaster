@@ -63,3 +63,13 @@ DEFAULT_CLIP_THRESHOLD: float = 2.5
 OUTLIER_SIGMA: float = (
     2.5  # ±2.5σ (previously 1.0; 1σ is too aggressive for promo-driven demand)
 )
+
+# ── Metric Composition ────────────────────────────────────────────────────────
+# Default weighted objective minimised by the Bayesian optimiser.
+# Each entry maps to a metric in sarima_bayes.metrics.METRIC_REGISTRY.
+# Weights do not need to sum to 1 but it is recommended for interpretability.
+# Configurable via config.yaml metrics.components.
+DEFAULT_METRIC_COMPONENTS: list = [
+    {"metric": "smape", "weight": 0.7},
+    {"metric": "rmsle", "weight": 0.3},
+]
