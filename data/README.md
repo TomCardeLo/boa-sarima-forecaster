@@ -11,8 +11,7 @@ This directory holds input data for the `sarima-bayes` forecasting pipeline.
 data/
 ├── sample_data.csv          ← Synthetic demo data (committed, safe to share)
 ├── input/                   ← Your real Excel files go here (git-ignored)
-│   ├── sales.xlsx
-│   └── representatives.xlsx
+│   └── sales.xlsx
 └── output/                  ← Forecast results written here (git-ignored)
 ```
 
@@ -39,20 +38,21 @@ This is the primary input consumed by `data_loader.load_data()`.
 
 #### Required columns
 
-| Column      | Type    | Format / notes                                                   |
-|-------------|---------|------------------------------------------------------------------|
-| `Date`      | string  | Period in `YYYYMM` format — e.g. `"202201"` = January 2022     |
-| `SKU`       | integer | Numeric product identifier                                       |
-| `CS`        | float   | Demand volume (case-equivalents, units, or any numeric measure)  |
-| `Country`   | string  | Market code — e.g. `"US"`, `"MX"`, `"BR"`                      |
+| Column | Type   | Format / notes                                                      |
+|--------|--------|---------------------------------------------------------------------|
+| `Date` | string | Period in `YYYYMM` format — e.g. `"202201"` = January 2022        |
+| `CS`   | float  | Target variable (case-equivalents, units, revenue, or any numeric measure) |
 
 #### Optional columns
 
-| Column           | Type   | Description                                         |
-|------------------|--------|-----------------------------------------------------|
-| `Forecast group` | string | Distribution channel used for channel-level splits  |
+| Column           | Type    | Default | Description                                         |
+|------------------|---------|---------|-----------------------------------------------------|
+| `SKU`            | integer | `1`     | Series identifier — omit for single-series use      |
+| `Country`        | string  | `"_"`   | Market code — e.g. `"US"`, `"MX"`, `"BR"`          |
+| `Forecast group` | string  | —       | Distribution channel used for channel-level splits  |
 
-> Additional columns present in the file are passed through unchanged.
+> `SKU` and `Country` are **auto-injected** with their defaults if not present.
+> Additional columns are passed through unchanged.
 
 #### Sample rows (as they would appear in Excel)
 
@@ -64,39 +64,6 @@ Date     | SKU  | CS    | Country
 202202   | 1001 | 142.0 | US
 202201   | 1002 | 195.0 | US
 ...
-```
-
----
-
-### 2. `representatives.xlsx` — SKU consolidation mapping
-
-Used **only** if you call `preprocessor.merge_representatives()`.  Maps
-detailed child SKUs to a single representative parent SKU for forecasting.
-
-#### Sheet structure
-
-The sheet can have any name; specify it in `config.yaml` under
-`data.representatives_path`.  No rows are skipped (`skip_rows=0`).
-
-#### Required columns
-
-| Column     | Type    | Description                                                         |
-|------------|---------|---------------------------------------------------------------------|
-| `Country`  | string  | Market code — must match values in `sales.xlsx`                     |
-| `SKU`      | integer | Source (child) SKU identifier                                       |
-| `To SKU`   | integer | Target (representative / parent) SKU identifier                     |
-
-> Rows where `To SKU` is blank / NaN are interpreted as self-mapping
-> (the SKU is its own representative and will not be consolidated).
-
-#### Sample rows
-
-```
-Country | SKU  | To SKU
-US      | 1001 | 1001
-US      | 1004 | 1001   ← SKU 1004 is consolidated into SKU 1001
-US      | 1005 | 1001   ← SKU 1005 is consolidated into SKU 1001
-MX      | 1002 | 1002
 ```
 
 ---

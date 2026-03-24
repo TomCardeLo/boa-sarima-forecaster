@@ -1,10 +1,9 @@
 """Data preprocessing utilities for monthly sales time series.
 
-This module provides three operations applied before model fitting:
+This module provides two operations applied before model fitting:
 
-1. ``clean_zeros``           – removes SKU series with zero cumulative demand.
-2. ``fill_blanks``           – fills missing calendar months with zero demand.
-3. ``merge_representatives`` – consolidates sales under representative SKUs.
+1. ``clean_zeros`` – removes SKU series with zero cumulative demand.
+2. ``fill_blanks`` – fills missing calendar months with zero demand.
 
 All functions operate on ``pd.DataFrame`` inputs and return copies so that
 the caller's original data is never modified in-place.
@@ -195,48 +194,3 @@ def fill_blanks(
     df_filled[value_col] = df_filled[value_col].fillna(0)
 
     return df_filled
-
-
-def merge_representatives(
-    bd: pd.DataFrame,
-    bd_rep: pd.DataFrame,
-    tradicional: bool = True,
-) -> pd.DataFrame:
-    """Consolidate sales of representative SKUs.
-
-    In some product hierarchies, multiple detailed SKUs are grouped under a
-    single "representative" SKU for forecasting purposes.  This function
-    performs a left-join on the mapping table and sums demand by the
-    representative SKU identifier.
-
-    Args:
-        bd: Historical sales DataFrame with columns
-            ``["Country", "Date", "SKU", "CS"]`` (and optionally
-            ``"Forecast group"``).
-        bd_rep: Mapping DataFrame with columns
-            ``["Country", "SKU", "To SKU"]``.  Rows where ``"To SKU"`` is
-            ``NaN`` are treated as self-mapping (the SKU is its own
-            representative).
-        tradicional: If ``True``, groups by ``["Country", "Date", "To SKU"]``.
-            If ``False``, also groups by ``"Forecast group"``.
-            Defaults to ``True``.
-
-    Returns:
-        Consolidated DataFrame with ``"SKU"`` replaced by the representative
-        value and ``"CS"`` summed within each group.
-
-    Example:
-        >>> merge_representatives(sales_df, mapping_df, tradicional=True)
-    """
-    bd = bd.merge(bd_rep, how="left", on=["Country", "SKU"])
-
-    # SKUs not present in the mapping table self-map (NaN → original SKU)
-    bd["To SKU"] = bd["To SKU"].fillna(bd["SKU"]).astype(int)
-
-    group_cols = ["Country", "Date", "To SKU"]
-    if not tradicional:
-        group_cols.append("Forecast group")
-
-    bd = bd.groupby(group_cols, as_index=False)[["CS"]].sum()
-
-    return bd.rename(columns={"To SKU": "SKU"})

@@ -18,12 +18,14 @@ Minimum required columns:
 
 - **Date** (str): Period identifier in ``YYYYMM`` format
   (e.g. ``"202201"`` for January 2022).
-- **SKU** (int): Numeric product identifier.
 - **CS** (float): Sales volume in case-equivalent units (or any demand unit).
+
+Optional columns — auto-injected with defaults if absent:
+
+- **SKU** (int): Numeric product identifier.  Defaults to ``1`` when
+  omitted (single-series use case).
 - **Country** (str): Market / country code (e.g. ``"US"``, ``"MX"``).
-
-Optional columns (passed through unchanged):
-
+  Defaults to ``"_"`` when omitted.
 - **Forecast group** (str): Distribution-channel segment used when the
   dataset is split by channel before forecasting.
 
@@ -88,11 +90,12 @@ def load_data(
 
     Returns:
         Cleaned ``pd.DataFrame`` with at minimum the columns
-        ``["Date", "SKU", "CS", "Country"]``.
+        ``["Date", "SKU", "CS", "Country"]``.  ``SKU`` and ``Country`` are
+        auto-injected with sentinel values (``1`` and ``"_"``) when absent.
 
     Raises:
         FileNotFoundError: If ``route`` does not point to an existing file.
-        KeyError: If the ``"SKU"`` or ``"Date"`` columns are missing.
+        KeyError: If the ``"Date"`` or ``"CS"`` columns are missing.
         ValueError: If ``SKU`` or ``CS`` cannot be cast to their expected types.
 
     Example:
@@ -120,9 +123,18 @@ def load_data(
     # ── 3. Fill NaN ────────────────────────────────────────────────────────────
     df = df.fillna(fill_na_value)
 
-    # ── 4. Drop invalid SKU marker rows ───────────────────────────────────────
+    # ── 3a. Auto-inject optional columns ──────────────────────────────────────
+    # SKU and Country are optional: single-series projects may omit them.
     if "SKU" not in df.columns:
-        raise KeyError("Column 'SKU' not found in the data sheet.")
+        df["SKU"] = 1
+        logger.info("Column 'SKU' not found — defaulting to 1 (single-series mode).")
+    if "Country" not in df.columns:
+        df["Country"] = "_"
+        logger.info(
+            "Column 'Country' not found — defaulting to '_' (single-series mode)."
+        )
+
+    # ── 4. Drop invalid SKU marker rows ───────────────────────────────────────
     df = df[df["SKU"] != invalid_sku_marker]
 
     # ── 5. Parse Date column ────────────────────────────────────────────────────
