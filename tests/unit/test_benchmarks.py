@@ -195,3 +195,89 @@ class TestSummaryTable:
         tbl = summary_table(results, group_cols=["Country", "SKU"])
         required = {"sMAPE_mean", "sMAPE_std", "RMSLE_mean", "RMSLE_std", "beats_naive"}
         assert required.issubset(tbl.columns)
+
+
+# ---------------------------------------------------------------------------
+# Tests for new freq / m parameters
+# ---------------------------------------------------------------------------
+
+
+class TestEtsModelWithM:
+    """ets_model must respect the m parameter."""
+
+    def test_ets_custom_m_length(self, clean_series):
+        # m=4 fits easily within a 36-point series
+        result = ets_model(clean_series, forecast_horizon=4, m=4)
+        assert len(result) == 4
+
+    def test_ets_custom_m_no_nan(self, clean_series):
+        result = ets_model(clean_series, forecast_horizon=4, m=4)
+        assert not result.isna().any()
+
+    def test_ets_fallback_uses_m(self):
+        # A very short series forces the ETS fallback to seasonal_naive;
+        # the fallback must honour m so the returned length is still correct.
+        short = pd.Series(
+            [10.0, 12.0, 11.0, 13.0],
+            index=pd.date_range("2023-01-01", periods=4, freq="MS"),
+        )
+        result = ets_model(short, forecast_horizon=3, m=4)
+        assert len(result) == 3
+        assert not result.isna().any()
+
+
+class TestAutoArimaNixtlaWithM:
+    """auto_arima_nixtla must accept m and freq parameters."""
+
+    @pytest.mark.slow
+    def test_auto_arima_custom_m_length(self, clean_series):
+        pytest.importorskip("statsforecast")
+        result = auto_arima_nixtla(clean_series, forecast_horizon=4, m=4, freq="MS")
+        assert len(result) == 4
+
+
+class TestRunBenchmarkComparisonFreq:
+    """run_benchmark_comparison must forward freq and m to all baselines."""
+
+    def test_explicit_defaults_match_implicit(self, two_group_df):
+        # Passing m=12, freq="MS" explicitly must produce the same row count
+        # as calling without those args (the old implicit defaults).
+        def _dummy(train: pd.Series) -> pd.Series:
+            _f = train.index.freq or "MS"
+            idx = pd.date_range(start=train.index[-1], periods=4, freq=_f)[1:]
+            return pd.Series([train.iloc[-1]] * 3, index=idx)
+
+        result = run_benchmark_comparison(
+            two_group_df,
+            group_cols=["Country", "SKU"],
+            target_col="CS",
+            date_col="Date",
+            sarima_model_fn=_dummy,
+            n_folds=3,
+            test_size=3,
+            min_train_size=12,
+            m=12,
+            freq="MS",
+        )
+        # 4 models × 3 folds × 2 groups = 24 rows
+        assert len(result) == 24
+
+    def test_accepts_freq_param_without_error(self, two_group_df):
+        def _dummy(train: pd.Series) -> pd.Series:
+            _f = train.index.freq or "MS"
+            idx = pd.date_range(start=train.index[-1], periods=4, freq=_f)[1:]
+            return pd.Series([train.iloc[-1]] * 3, index=idx)
+
+        # Should not raise even when freq is explicitly supplied
+        result = run_benchmark_comparison(
+            two_group_df,
+            group_cols=["Country", "SKU"],
+            target_col="CS",
+            date_col="Date",
+            sarima_model_fn=_dummy,
+            n_folds=3,
+            test_size=3,
+            min_train_size=12,
+            freq="MS",
+        )
+        assert "model" in result.columns

@@ -26,8 +26,14 @@ data:
   # "%Y%m" matches values like "202201" (January 2022).
   date_format: "%Y%m"
 
-  # Extend the time axis up to this date when filling missing months.
+  # Extend the time axis up to this date when filling missing periods.
   end_date: "2026-01-01"
+
+  # Pandas offset alias for the time-series sampling frequency.
+  # Common values: "MS" (month start), "W" (weekly), "D" (daily), "h" (hourly).
+  # When changing freq, also update model.sarima.seasonal_period to match the
+  # seasonality cycle you care about — e.g. "W" → 52 (annual), "D" → 7 (weekly).
+  freq: "MS"
 
 # ── Optimisation ──────────────────────────────────────────────────────────────
 optimization:
@@ -51,7 +57,11 @@ optimization:
 model:
   sarima:
     # Fixed seasonal period (m) — NOT optimised by the Bayesian search.
-    # 12 for monthly data captures the annual demand cycle.
+    # Must match the seasonality cycle of your data:
+    #   freq "MS" (monthly)  → seasonal_period 12  (annual cycle)
+    #   freq "W"  (weekly)   → seasonal_period 52  (annual cycle)
+    #   freq "D"  (daily)    → seasonal_period 7   (weekly cycle)
+    #   freq "h"  (hourly)   → seasonal_period 24  (daily cycle)
     seasonal_period: 12
 
     # Complexity constraints applied before fitting each trial (penalty = 1e6):
