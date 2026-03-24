@@ -19,9 +19,10 @@
 6. [Quick Start](#quick-start)
 7. [Input Data Format](#input-data-format)
 8. [Configuration](#configuration)
-9. [Running the Demo Notebook](#running-the-demo-notebook)
-10. [Output Files](#output-files)
-11. [License](#license)
+9. [Configurable Metric](#configurable-metric)
+10. [Running the Demo Notebook](#running-the-demo-notebook)
+11. [Output Files](#output-files)
+12. [License](#license)
 
 ---
 
@@ -68,11 +69,13 @@ forecast.
 
 The **Tree-structured Parzen Estimator (TPE)** searches the integer space
 `p ∈ [0, 6], d ∈ [0, 2], q ∈ [0, 6]` (147 combinations) to minimise
-the hybrid cost function:
+a configurable weighted metric.  The default objective is:
 
 ```
 combined = 0.7 × sMAPE + 0.3 × RMSLE
 ```
+
+The metric composition is fully configurable — see [Configurable Metric](#configurable-metric).
 
 The TPE sampler:
 - Uses `multivariate=True` to capture correlations between p and q.
@@ -325,6 +328,72 @@ output:
 > so you can model weekly seasonality on daily data (`freq="D"`, `m=7`).
 
 All constants also have Python-level defaults in `src/sarima_bayes/config.py`.
+
+---
+
+## Configurable Metric
+
+The optimisation objective is not restricted to `sMAPE + RMSLE`.  Any
+weighted combination of the built-in metrics can be used, making the library
+applicable to contexts beyond demand forecasting.
+
+### Available metrics
+
+| Name | Formula | Best suited for |
+|------|---------|-----------------|
+| `smape` | `100 × mean(\|y-ŷ\| / ((\|y\|+\|ŷ\|)/2 + ε))` | Intermittent / zero-heavy demand |
+| `rmsle` | `√mean((log(1+y) − log(1+ŷ))²)` | Series spanning multiple orders of magnitude |
+| `mae`   | `mean(\|y − ŷ\|)` | Revenue, price — absolute scale matters |
+| `rmse`  | `√mean((y − ŷ)²)` | Penalises large deviations more than MAE |
+| `mape`  | `100 × mean(\|y − ŷ\| / (\|y\| + ε))` | Clean series without zeros |
+
+### Setting the metric via `config.yaml`
+
+```yaml
+metrics:
+  components:
+    - metric: smape
+      weight: 0.7
+    - metric: rmsle
+      weight: 0.3
+```
+
+**Alternative — revenue / price forecasting (absolute scale matters):**
+
+```yaml
+metrics:
+  components:
+    - metric: mae
+      weight: 0.6
+    - metric: rmse
+      weight: 0.4
+```
+
+### Setting the metric programmatically
+
+```python
+from sarima_bayes import optimize_arima, build_combined_metric
+
+# Pass metric_components directly to the optimiser
+best_params, score = optimize_arima(
+    series=series,
+    n_calls=30,
+    metric_components=[
+        {"metric": "mae",  "weight": 0.6},
+        {"metric": "rmse", "weight": 0.4},
+    ],
+)
+
+# Or build a reusable callable for your own scoring
+fn = build_combined_metric([
+    {"metric": "mae",  "weight": 0.6},
+    {"metric": "rmse", "weight": 0.4},
+])
+score = fn(y_true, y_pred)
+```
+
+Weights do not need to sum to 1, but it is recommended for interpretability.
+An unknown metric name raises a `ValueError` listing available options.
 
 ---
 
