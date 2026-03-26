@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sarima-bayes"
-version = "0.1.0"
-description = "Monthly demand forecasting with ARIMA + Bayesian Optimisation (Optuna TPE)"
+version = "2.0.0"
+description = "Bayesian TPE optimization framework for time series forecasting"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
@@ -17,6 +17,7 @@ dependencies = [
     "openpyxl>=3.1",
     "joblib>=1.3",
     "statsforecast>=1.7",
+    "scikit-learn>=1.3",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +30,28 @@ dev = [
     "pytest>=7.0",
     "black>=23.0",
     "ruff>=0.1",
+]
+sklearn = [
+    "scikit-learn>=1.3",
+]
+xgboost = [
+    "xgboost>=2.0",
+]
+lightgbm = [
+    "lightgbm>=4.0",
+]
+ml = [
+    "scikit-learn>=1.3",
+    "xgboost>=2.0",
+    "lightgbm>=4.0",
+]
+all = [
+    "scikit-learn>=1.3",
+    "xgboost>=2.0",
+    "lightgbm>=4.0",
+    "matplotlib>=3.7",
+    "jupyter>=1.0",
+    "ipykernel>=6.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -55,4 +78,8 @@ known-first-party = ["src"]
 [tool.pytest.ini_options]
 markers = [
     "slow: marks tests that call external ML libraries and take longer to run (deselect with '-m not slow')",
+    "requires_sklearn: tests that need scikit-learn installed",
+    "requires_xgboost: tests that need xgboost installed",
+    "requires_lightgbm: tests that need lightgbm installed",
+    "integration: multi-model end-to-end tests",
 ]

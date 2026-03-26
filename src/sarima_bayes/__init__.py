@@ -1,47 +1,46 @@
 """
-sarima_bayes: SARIMA + Bayesian Optimisation for monthly demand forecasting.
+sarima_bayes — deprecated compatibility shim for boa_forecaster.
 
-Public API
-----------
-The most commonly used symbols are re-exported here for convenience:
+This package has been renamed to ``boa_forecaster``.
+All symbols are re-exported from there.
 
-.. code-block:: python
+.. deprecated::
+    ``sarima_bayes`` will be removed in v3.0.
+    Update your imports::
 
-    from sarima_bayes import optimize_arima, forecast_arima, combined_metric
-
-Modules
--------
-config
-    Global constants (date formats, search-space bounds, optimisation budget).
-data_loader
-    Excel ingestion and minimal data cleaning.
-preprocessor
-    Missing-date fill and zero-series removal.
-standardization
-    Weighted moving-average smoother and outlier clipping.
-metrics
-    sMAPE, RMSLE, MAE, RMSE, MAPE, metric registry, and the combined cost
-    function factory used by the optimiser.
-optimizer
-    Bayesian Optimisation (Optuna TPE) for ARIMA order search.
-model
-    SARIMA model fitting and forecast generation.
+        # old
+        from sarima_bayes import optimize_arima
+        # new
+        from boa_forecaster import optimize_arima
 """
 
-from sarima_bayes.benchmarks import run_benchmark_comparison, summary_table
-from sarima_bayes.metrics import (
+import warnings
+
+warnings.warn(
+    "The 'sarima_bayes' package has been renamed to 'boa_forecaster'. "
+    "Please update your imports. 'sarima_bayes' will be removed in v3.0.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+from boa_forecaster import *  # noqa: F401, F403
+from boa_forecaster import (  # noqa: F401 — explicit re-exports for tooling
     METRIC_REGISTRY,
     build_combined_metric,
     combined_metric,
+    forecast_arima,
     mae,
     mape,
+    optimize_arima,
+    pred_arima,
     rmse,
     rmsle,
+    run_benchmark_comparison,
     smape,
+    summary_table,
+    validate_by_group,
+    walk_forward_validation,
 )
-from sarima_bayes.model import forecast_arima, pred_arima
-from sarima_bayes.optimizer import optimize_arima
-from sarima_bayes.validation import validate_by_group, walk_forward_validation
 
 __all__ = [
     "optimize_arima",
