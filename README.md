@@ -26,7 +26,8 @@
 13. [Running the Demo Notebook](#running-the-demo-notebook)
 14. [Output Files](#output-files)
 15. [Backward Compatibility](#backward-compatibility)
-16. [License](#license)
+16. [Contributing](#contributing)
+17. [License](#license)
 
 ---
 
@@ -537,6 +538,12 @@ from sarima_bayes import optimize_arima, forecast_arima
 from boa_forecaster import optimize_model
 from boa_forecaster.models import SARIMASpec
 ```
+
+---
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
