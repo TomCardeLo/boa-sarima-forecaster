@@ -104,6 +104,38 @@ def test_optimization_result_fields():
     assert r.model_name == "sarima"
 
 
+def test_optimization_result_save_load_roundtrip(tmp_path):
+    r = OptimizationResult(
+        best_params={"p": 2, "d": 1, "q": 1},
+        best_score=0.123,
+        n_trials=50,
+        model_name="sarima",
+    )
+    path = tmp_path / "result.joblib"
+    r.save(path)
+    loaded = OptimizationResult.load(path)
+    assert loaded.best_params == r.best_params
+    assert loaded.best_score == r.best_score
+    assert loaded.n_trials == r.n_trials
+    assert loaded.model_name == r.model_name
+
+
+def test_optimization_result_save_creates_file(tmp_path):
+    r = OptimizationResult(best_params={}, best_score=1.0, n_trials=1, model_name="x")
+    path = tmp_path / "out.joblib"
+    assert not path.exists()
+    r.save(path)
+    assert path.exists()
+
+
+def test_optimization_result_load_accepts_str_path(tmp_path):
+    r = OptimizationResult(best_params={}, best_score=0.0, n_trials=5, model_name="rf")
+    path = str(tmp_path / "result.joblib")
+    r.save(path)
+    loaded = OptimizationResult.load(path)
+    assert loaded.model_name == "rf"
+
+
 # ── suggest_from_space ────────────────────────────────────────────────────────
 
 

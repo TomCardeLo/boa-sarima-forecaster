@@ -214,4 +214,3 @@ class RandomForestSpec:
             return _recursive_forecast(rf, fe, train, horizon)
 
         return forecaster
-

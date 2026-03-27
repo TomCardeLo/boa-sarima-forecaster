@@ -55,6 +55,7 @@ class SARIMASpec:
         D_range: tuple[int, int] = DEFAULT_D_SEASONAL_RANGE,
         Q_range: tuple[int, int] = DEFAULT_Q_SEASONAL_RANGE,
         m: int = DEFAULT_SEASONAL_PERIOD,
+        forecast_horizon: int = 12,
     ) -> None:
         self.p_range = p_range
         self.d_range = d_range
@@ -63,6 +64,7 @@ class SARIMASpec:
         self.D_range = D_range
         self.Q_range = Q_range
         self.m = m
+        self.forecast_horizon = forecast_horizon
 
     # ── ModelSpec properties ──────────────────────────────────────────────────
 
@@ -147,8 +149,8 @@ class SARIMASpec:
         """Return a closure ``forecaster(train: pd.Series) -> pd.Series``.
 
         The returned callable fits SARIMAX on *train* with the given *params*
-        and produces a 12-step-ahead forecast as a ``pd.Series`` with a
-        ``DatetimeIndex`` (when *train* has one).
+        and produces a ``forecast_horizon``-step-ahead forecast as a
+        ``pd.Series`` with a ``DatetimeIndex`` (when *train* has one).
 
         Args:
             params: Dict with keys ``p, d, q`` and optionally ``P, D, Q, m``.
@@ -162,6 +164,7 @@ class SARIMASpec:
         D = params.get("D", 0)
         Q = params.get("Q", 0)
         m = params.get("m", self.m)
+        horizon = self.forecast_horizon
 
         def forecaster(train: pd.Series) -> pd.Series:
             model = SARIMAX(
@@ -172,7 +175,7 @@ class SARIMASpec:
                 enforce_invertibility=False,
             )
             fit = model.fit(disp=False)
-            return fit.get_forecast(steps=12).predicted_mean
+            return fit.get_forecast(steps=horizon).predicted_mean
 
         return forecaster
 

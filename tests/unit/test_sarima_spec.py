@@ -177,6 +177,15 @@ def test_build_forecaster_uses_m_from_params(synthetic_series):
     assert len(result) == 12
 
 
+def test_build_forecaster_custom_forecast_horizon(synthetic_series):
+    """forecast_horizon on SARIMASpec must control the number of forecast steps."""
+    spec = SARIMASpec(forecast_horizon=6)
+    params = {"p": 1, "d": 1, "q": 0, "P": 0, "D": 0, "Q": 0}
+    forecaster = spec.build_forecaster(params)
+    result = forecaster(synthetic_series)
+    assert len(result) == 6
+
+
 # ── pred_arima (free function) ────────────────────────────────────────────────
 
 

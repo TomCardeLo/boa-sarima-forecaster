@@ -63,9 +63,7 @@ def _validate_series(series: pd.Series, min_length: int = _MIN_SERIES_LENGTH) ->
             too short, or the series contains NaN or Inf values.
     """
     if not isinstance(series, pd.Series):
-        raise TypeError(
-            f"series must be a pd.Series, got {type(series).__name__!r}."
-        )
+        raise TypeError(f"series must be a pd.Series, got {type(series).__name__!r}.")
     if not isinstance(series.index, pd.DatetimeIndex):
         raise ValueError(
             "series must have a DatetimeIndex. "
