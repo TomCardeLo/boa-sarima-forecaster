@@ -2,6 +2,8 @@
 
 > Multi-model demand forecasting with Bayesian Optimisation (Optuna TPE) — SARIMA, Random Forest, XGBoost, LightGBM
 
+> **Note:** The repository name `boa-sarima-forecaster` is historical — v2.0 supports multiple model families beyond SARIMA.
+
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Version](https://img.shields.io/badge/version-2.0.0-brightgreen)
@@ -125,6 +127,14 @@ enabling all available CPU cores to be utilised.
 
 > **Note:** Values are from synthetic demo data. Results on real production data will vary.
 
+### Forecast vs Actuals
+
+![Forecast vs Actuals](docs/img/forecast_vs_actuals.png)
+
+### Model Comparison
+
+![Model Comparison](docs/img/model_comparison.png)
+
 ---
 
 ## Project Structure
@@ -180,6 +190,8 @@ boa-sarima-forecaster/
 
 ## Installation
 
+> **Note:** This package is not yet on PyPI. Install directly from the repository.
+
 ### Core (SARIMA only)
 
 ```bash
@@ -206,6 +218,10 @@ pip install -e ".[xgboost]"    # XGBoost only
 pip install -e ".[lightgbm]"   # LightGBM only
 pip install -e ".[ml]"         # XGBoost + LightGBM (scikit-learn is always installed)
 ```
+
+### Core dependencies
+
+The project requires Python 3.9+ and depends on: pandas, numpy, statsmodels, optuna, joblib, and scikit-learn. See `pyproject.toml` for the full dependency list.
 
 ---
 
