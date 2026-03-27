@@ -241,4 +241,3 @@ class XGBoostSpec:
             return _recursive_forecast(model, fe, train, horizon)
 
         return forecaster
-

@@ -17,8 +17,10 @@ Design notes
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, Union, runtime_checkable
 
+import joblib
 import optuna
 
 if TYPE_CHECKING:
@@ -74,6 +76,15 @@ class OptimizationResult:
     best_score: float
     n_trials: int
     model_name: str
+
+    def save(self, path: str | Path) -> None:
+        """Persist this result to *path* using joblib serialisation."""
+        joblib.dump(self, path)
+
+    @classmethod
+    def load(cls, path: str | Path) -> OptimizationResult:
+        """Load and return an ``OptimizationResult`` previously saved to *path*."""
+        return joblib.load(path)
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
