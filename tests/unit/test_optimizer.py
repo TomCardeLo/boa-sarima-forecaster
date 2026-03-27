@@ -1,7 +1,7 @@
 """Tests for sarima_bayes.optimizer: optimize_arima."""
 
-from sarima_bayes.config import DEFAULT_SEASONAL_PERIOD
-from sarima_bayes.optimizer import OPTIMIZER_PENALTY, optimize_arima
+from boa_forecaster.config import DEFAULT_SEASONAL_PERIOD
+from boa_forecaster.optimizer import OPTIMIZER_PENALTY, optimize_arima
 
 # Expected full parameter key set after BREAKING CHANGE (seasonal params added)
 _EXPECTED_KEYS = {"p", "d", "q", "P", "D", "Q", "m"}

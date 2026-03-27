@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sarima_bayes.benchmarks import (
+from boa_forecaster.benchmarks import (
     auto_arima_nixtla,
     ets_model,
     run_benchmark_comparison,

@@ -5,7 +5,7 @@ import math
 import pandas as pd
 import pytest
 
-from sarima_bayes.standardization import clip_outliers, weighted_moving_stats
+from boa_forecaster.standardization import clip_outliers, weighted_moving_stats
 
 # ---------------------------------------------------------------------------
 # weighted_moving_stats (existing tests, preserved)
