@@ -74,7 +74,7 @@ class TestValidateSeries:
         with pytest.raises(TypeError, match="pd.Series"):
             optimize_model([1.0] * 30, SARIMASpec(), n_calls=1)
 
-    def test_rejects_list_not_series(self):
+    def test_rejects_ndarray_not_series(self):
         with pytest.raises(TypeError):
             optimize_model(np.ones(30), SARIMASpec(), n_calls=1)
 

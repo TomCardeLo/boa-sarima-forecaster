@@ -218,9 +218,6 @@ def optimize_arima(
     """
     import warnings
 
-    import numpy as np
-    import pandas as pd
-
     warnings.warn(
         "optimize_arima() is deprecated. Use optimize_model() with SARIMASpec instead. "
         "'optimize_arima' will be removed in v3.0.",
