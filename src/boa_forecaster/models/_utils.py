@@ -7,6 +7,7 @@ copy-paste duplication.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from boa_forecaster.features import FeatureEngineer
@@ -43,23 +44,22 @@ def recursive_forecast(
         ``pd.Series`` of length *horizon* with a ``DatetimeIndex`` starting
         one month after the last training date (``freq="MS"``).
     """
-    extended = train.copy()
-    preds: list[float] = []
-
-    for _ in range(horizon):
-        X_all = fe.transform(extended)
-        y_pred = float(model.predict(X_all.iloc[[-1]])[0])
-
-        next_date = extended.index[-1] + pd.DateOffset(months=1)
-        new_point = pd.Series([y_pred], index=[next_date])
-        extended = pd.concat([extended, new_point])
-        preds.append(y_pred)
-
     future_index = pd.date_range(
         start=train.index[-1] + pd.DateOffset(months=1),
         periods=horizon,
         freq="MS",
     )
+    # Pre-allocate: avoids O(horizon²) pd.concat inside the loop.
+    extended = pd.concat([train, pd.Series(np.nan, index=future_index)])
+    train_len = len(train)
+    preds: list[float] = []
+
+    for i in range(horizon):
+        X_all = fe.transform(extended.iloc[: train_len + i])
+        y_pred = float(model.predict(X_all.iloc[[-1]])[0])
+        extended.iloc[train_len + i] = y_pred
+        preds.append(y_pred)
+
     return pd.Series(preds, index=future_index, name="forecast")
 
 
