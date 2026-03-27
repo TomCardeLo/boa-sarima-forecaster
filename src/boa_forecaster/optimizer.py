@@ -22,7 +22,9 @@ import os
 import warnings as _warnings
 from typing import TYPE_CHECKING
 
+import numpy as np
 import optuna
+import pandas as pd
 from optuna.samplers import TPESampler
 
 from boa_forecaster.config import (
@@ -40,8 +42,6 @@ from boa_forecaster.metrics import build_combined_metric
 from boa_forecaster.models.base import OptimizationResult
 
 if TYPE_CHECKING:
-    import pandas as pd
-
     from boa_forecaster.features import FeatureConfig
     from boa_forecaster.models.base import ModelSpec
 
@@ -50,6 +50,42 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 _warnings.filterwarnings("ignore", category=optuna.exceptions.ExperimentalWarning)
 
 logger = logging.getLogger(__name__)
+
+_MIN_SERIES_LENGTH: int = 24
+
+
+def _validate_series(series: pd.Series, min_length: int = _MIN_SERIES_LENGTH) -> None:
+    """Validate *series* before running optimisation.
+
+    Raises:
+        TypeError: If *series* is not a ``pd.Series``.
+        ValueError: If the index is not a ``DatetimeIndex``, the series is
+            too short, or the series contains NaN or Inf values.
+    """
+    if not isinstance(series, pd.Series):
+        raise TypeError(
+            f"series must be a pd.Series, got {type(series).__name__!r}."
+        )
+    if not isinstance(series.index, pd.DatetimeIndex):
+        raise ValueError(
+            "series must have a DatetimeIndex. "
+            "Use pd.date_range() to build an appropriate index."
+        )
+    if len(series) < min_length:
+        raise ValueError(
+            f"series has {len(series)} observations but at least "
+            f"{min_length} are required for meaningful optimisation."
+        )
+    if series.isna().any():
+        raise ValueError(
+            "series contains NaN values. "
+            "Handle missing values before calling optimize_model()."
+        )
+    if np.isinf(series.to_numpy()).any():
+        raise ValueError(
+            "series contains Inf values. "
+            "Remove or replace infinite values before calling optimize_model()."
+        )
 
 
 def optimize_model(
@@ -81,6 +117,8 @@ def optimize_model(
         ``OptimizationResult`` with ``best_params``, ``best_score``,
         ``n_trials``, and ``model_name``.
     """
+    _validate_series(series)
+
     if n_jobs is None or n_jobs < 1:
         n_jobs = os.cpu_count() or 1
 

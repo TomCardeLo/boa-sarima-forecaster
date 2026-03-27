@@ -29,6 +29,8 @@ fold.  No test-set information leaks into the features.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
@@ -54,6 +56,8 @@ from boa_forecaster.models._utils import (
     split_for_early_stopping as _split_for_early_stopping,
 )
 from boa_forecaster.models.base import FloatParam, IntParam, suggest_from_space
+
+logger = logging.getLogger(__name__)
 
 
 class LightGBMSpec:
@@ -227,7 +231,8 @@ class LightGBMSpec:
 
                 y_pred = _recursive_forecast(model, fe, train, len(test))
                 scores.append(metric_fn(test.values, y_pred.values))
-            except Exception:
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("LightGBMSpec.evaluate fold %d failed: %s", k + 1, exc)
                 return OPTIMIZER_PENALTY
 
         if not scores:
