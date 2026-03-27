@@ -189,7 +189,6 @@ source .venv/bin/activate      # Linux / macOS
 .venv\Scripts\activate         # Windows
 
 pip install -e ".[dev]"
-pip install pytest-cov
 ```
 
 ### With ML models (Random Forest, XGBoost, LightGBM)
