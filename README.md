@@ -1,4 +1,4 @@
-# boa-sarima-forecaster
+# BOA Forecaster
 
 > Multi-model demand forecasting with Bayesian Optimisation (Optuna TPE) — SARIMA, Random Forest, XGBoost, LightGBM
 
