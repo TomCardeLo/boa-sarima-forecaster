@@ -35,12 +35,19 @@ except ImportError:
 
 from boa_forecaster.config import OPTIMIZER_PENALTY
 from boa_forecaster.features import FeatureConfig, FeatureEngineer
+from boa_forecaster.models._utils import (
+    MIN_TRAIN_SIZE as _MIN_TRAIN_SIZE,
+)
+from boa_forecaster.models._utils import (
+    N_CV_FOLDS as _N_CV_FOLDS,
+)
+from boa_forecaster.models._utils import (
+    recursive_forecast as _recursive_forecast,
+)
+from boa_forecaster.models._utils import (
+    split_for_early_stopping as _split_for_early_stopping,
+)
 from boa_forecaster.models.base import FloatParam, IntParam, suggest_from_space
-
-_MIN_TRAIN_SIZE: int = 24
-_N_CV_FOLDS: int = 3
-_VAL_FRACTION: float = 0.2  # fraction of training fold used as early-stopping val set
-_MIN_VAL_SIZE: int = 6  # minimum months for the inner validation split
 
 
 class XGBoostSpec:
@@ -178,11 +185,7 @@ class XGBoostSpec:
                 X_all, y_all = fe.fit_transform(train)
 
                 # Inner val split for early stopping — no leakage into test fold
-                val_size = max(_MIN_VAL_SIZE, int(len(X_all) * _VAL_FRACTION))
-                X_tr = X_all.iloc[:-val_size]
-                y_tr = y_all.iloc[:-val_size]
-                X_val = X_all.iloc[-val_size:]
-                y_val = y_all.iloc[-val_size:]
+                X_tr, y_tr, X_val, y_val = _split_for_early_stopping(X_all, y_all)
 
                 model = xgb.XGBRegressor(
                     **params,
@@ -193,7 +196,7 @@ class XGBoostSpec:
                 )
                 model.fit(X_tr, y_tr, eval_set=[(X_val, y_val)], verbose=False)
 
-                y_pred = self._recursive_forecast(model, fe, train, len(test))
+                y_pred = _recursive_forecast(model, fe, train, len(test))
                 scores.append(metric_fn(test.values, y_pred.values))
             except Exception:
                 return OPTIMIZER_PENALTY
@@ -230,49 +233,7 @@ class XGBoostSpec:
             X_train, y_train = fe.fit_transform(train)
             model = xgb.XGBRegressor(**params, random_state=42, verbosity=0)
             model.fit(X_train, y_train)
-            return self._recursive_forecast(model, fe, train, horizon)
+            return _recursive_forecast(model, fe, train, horizon)
 
         return forecaster
 
-    # ── Internal helpers ──────────────────────────────────────────────────────
-
-    def _recursive_forecast(
-        self,
-        model,
-        fe: FeatureEngineer,
-        train: pd.Series,
-        horizon: int,
-    ) -> pd.Series:
-        """Predict *horizon* steps ahead using recursive (one-step-at-a-time) forecasting.
-
-        At each step the latest prediction is appended to the series so that lag
-        and rolling features for the next step can be computed causally.
-
-        Args:
-            model: Fitted ``XGBRegressor``.
-            fe: ``FeatureEngineer`` already fitted on *train* via ``fit_transform``.
-            train: Training series (used to seed the extended series).
-            horizon: Number of future steps to predict.
-
-        Returns:
-            ``pd.Series`` of length *horizon* with a ``DatetimeIndex`` starting
-            one month after the last training date (``freq="MS"``).
-        """
-        extended = train.copy()
-        preds: list[float] = []
-
-        for _ in range(horizon):
-            X_all = fe.transform(extended)
-            y_pred = float(model.predict(X_all.iloc[[-1]])[0])
-
-            next_date = extended.index[-1] + pd.DateOffset(months=1)
-            new_point = pd.Series([y_pred], index=[next_date])
-            extended = pd.concat([extended, new_point])
-            preds.append(y_pred)
-
-        future_index = pd.date_range(
-            start=train.index[-1] + pd.DateOffset(months=1),
-            periods=horizon,
-            freq="MS",
-        )
-        return pd.Series(preds, index=future_index, name="forecast")
