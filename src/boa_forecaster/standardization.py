@@ -21,6 +21,8 @@ Public functions
     Per-observation local-neighbourhood smoother and clipper.
 """
 
+import warnings
+
 import numpy as np
 import pandas as pd
 
@@ -63,12 +65,26 @@ def clip_outliers(
     if method == "sigma":
         mu = series.mean()
         sigma = series.std(ddof=1)
+        if sigma == 0:
+            warnings.warn(
+                "clip_outliers: series has zero standard deviation "
+                "(constant series); no values will be clipped.",
+                UserWarning,
+                stacklevel=2,
+            )
         lower = mu - threshold * sigma
         upper = mu + threshold * sigma
     elif method == "iqr":
         q1 = series.quantile(0.25)
         q3 = series.quantile(0.75)
         iqr = q3 - q1
+        if iqr == 0:
+            warnings.warn(
+                "clip_outliers: series has zero IQR "
+                "(constant or near-constant series); no values will be clipped.",
+                UserWarning,
+                stacklevel=2,
+            )
         lower = q1 - threshold * iqr
         upper = q3 + threshold * iqr
     else:

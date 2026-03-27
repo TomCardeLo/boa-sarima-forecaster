@@ -108,3 +108,13 @@ class TestClipOutliers:
     def test_output_index_preserved(self, series_with_outlier):
         result = clip_outliers(series_with_outlier, method="sigma", threshold=2.5)
         pd.testing.assert_index_equal(result.index, series_with_outlier.index)
+
+    def test_sigma_warns_on_constant_series(self):
+        s = pd.Series([5.0] * 10)
+        with pytest.warns(UserWarning, match="zero standard deviation"):
+            clip_outliers(s, method="sigma")
+
+    def test_iqr_warns_on_constant_series(self):
+        s = pd.Series([5.0] * 10)
+        with pytest.warns(UserWarning, match="zero IQR"):
+            clip_outliers(s, method="iqr")
