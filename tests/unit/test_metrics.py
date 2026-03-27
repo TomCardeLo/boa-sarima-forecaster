@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from sarima_bayes.metrics import (
+from boa_forecaster.metrics import (
     METRIC_REGISTRY,
     build_combined_metric,
     combined_metric,

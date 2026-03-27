@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sarima_bayes.validation import validate_by_group, walk_forward_validation
+from boa_forecaster.validation import validate_by_group, walk_forward_validation
 
 # ---------------------------------------------------------------------------
 # Helpers

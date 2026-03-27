@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from sarima_bayes.preprocessor import _freq_to_period_alias, fill_blanks
+from boa_forecaster.preprocessor import _freq_to_period_alias, clean_zeros, fill_blanks
 
 
 class TestFreqToPeriodAlias:
@@ -104,3 +104,45 @@ class TestFillBlanksWeekly:
         df = pd.DataFrame(rows)
         result = fill_blanks(df, group_cols=["SKU"], freq="W")
         assert len(result) == 8  # 4 weeks × 2 groups
+
+
+class TestCleanZeros:
+    """clean_zeros was previously untested."""
+
+    def test_all_zero_group_removed(self):
+        df = pd.DataFrame({"SKU": [1, 1, 2, 2], "CS": [0.0, 0.0, 100.0, 200.0]})
+        result = clean_zeros(df)
+        assert set(result["SKU"].unique()) == {2}
+
+    def test_nonzero_group_kept(self):
+        df = pd.DataFrame({"SKU": [1, 1], "CS": [10.0, 20.0]})
+        result = clean_zeros(df)
+        assert len(result) == 2
+
+    def test_mixed_group_kept(self):
+        # Group has some zeros but sum != 0 — must be kept
+        df = pd.DataFrame({"SKU": [1, 1, 1], "CS": [0.0, 0.0, 5.0]})
+        result = clean_zeros(df)
+        assert len(result) == 3
+
+    def test_all_groups_zero_returns_empty(self):
+        df = pd.DataFrame({"SKU": [1, 1, 2, 2], "CS": [0.0, 0.0, 0.0, 0.0]})
+        result = clean_zeros(df)
+        assert len(result) == 0
+
+    def test_custom_group_cols(self):
+        df = pd.DataFrame(
+            {
+                "Country": ["US", "US", "MX", "MX"],
+                "SKU": [1, 1, 1, 1],
+                "CS": [0.0, 0.0, 50.0, 50.0],
+            }
+        )
+        result = clean_zeros(df, group_cols=["Country", "SKU"])
+        assert list(result["Country"].unique()) == ["MX"]
+
+    def test_returns_copy_not_inplace(self):
+        df = pd.DataFrame({"SKU": [1, 1, 2, 2], "CS": [0.0, 0.0, 10.0, 20.0]})
+        result = clean_zeros(df)
+        assert len(df) == 4  # original unchanged
+        assert len(result) == 2
