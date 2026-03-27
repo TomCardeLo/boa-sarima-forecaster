@@ -15,7 +15,7 @@ from boa_forecaster.config import OPTIMIZER_PENALTY
 from boa_forecaster.features import FeatureConfig
 from boa_forecaster.metrics import combined_metric
 from boa_forecaster.models.base import FloatParam, IntParam, ModelSpec
-from boa_forecaster.models.xgboost import HAS_XGBOOST, XGBoostSpec
+from boa_forecaster.models.xgboost import XGBoostSpec
 
 # ── Protocol & metadata ───────────────────────────────────────────────────────
 
@@ -145,7 +145,11 @@ class TestXGBoostSpecWarmStarts:
     def test_warm_starts_learning_rate_within_range(self):
         space = XGBoostSpec().search_space
         for ws in XGBoostSpec().warm_starts:
-            assert space["learning_rate"].low <= ws["learning_rate"] <= space["learning_rate"].high
+            assert (
+                space["learning_rate"].low
+                <= ws["learning_rate"]
+                <= space["learning_rate"].high
+            )
 
     def test_warm_starts_reg_alpha_within_log_bounds(self):
         """reg_alpha must be >= 1e-8 (log-scale floor), not 0.0."""

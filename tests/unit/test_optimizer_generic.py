@@ -5,7 +5,6 @@ from __future__ import annotations
 import warnings
 
 import optuna
-import pandas as pd
 import pytest
 
 from boa_forecaster.config import OPTIMIZER_PENALTY

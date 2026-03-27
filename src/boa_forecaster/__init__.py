@@ -8,6 +8,15 @@ __version__ = "2.0.0-dev"
 
 # ── Metrics (Phase 0) ─────────────────────────────────────────────────────────
 # ── Feature engineering (Phase 1) ────────────────────────────────────────────
+# ── Benchmarks & comparison (Phase 5) ────────────────────────────────────────
+from boa_forecaster.benchmarks import (
+    auto_arima_nixtla,
+    ets_model,
+    run_benchmark_comparison,
+    run_model_comparison,
+    seasonal_naive,
+    summary_table,
+)
 from boa_forecaster.features import FeatureConfig, FeatureEngineer
 from boa_forecaster.metrics import (
     METRIC_REGISTRY,
@@ -21,7 +30,13 @@ from boa_forecaster.metrics import (
 )
 
 # ── Model registry & types (Phase 1) ─────────────────────────────────────────
-from boa_forecaster.models import MODEL_REGISTRY, get_model_spec, register_model
+from boa_forecaster.models import (
+    MODEL_REGISTRY,
+    LightGBMSpec,  # None if lightgbm not installed
+    XGBoostSpec,  # None if xgboost not installed
+    get_model_spec,
+    register_model,
+)
 from boa_forecaster.models.base import (
     CategoricalParam,
     FloatParam,
@@ -32,8 +47,6 @@ from boa_forecaster.models.base import (
 )
 from boa_forecaster.models.random_forest import RandomForestSpec
 from boa_forecaster.models.sarima import SARIMASpec, forecast_arima, pred_arima
-from boa_forecaster.models import XGBoostSpec  # None if xgboost not installed
-from boa_forecaster.models import LightGBMSpec  # None if lightgbm not installed
 
 # ── Optimisation engine (Phase 1) ────────────────────────────────────────────
 from boa_forecaster.optimizer import optimize_arima, optimize_model
@@ -44,16 +57,6 @@ from boa_forecaster.standardization import clip_outliers, weighted_moving_stats
 
 # ── Validation (Phase 0) ──────────────────────────────────────────────────────
 from boa_forecaster.validation import validate_by_group, walk_forward_validation
-
-# ── Benchmarks & comparison (Phase 5) ────────────────────────────────────────
-from boa_forecaster.benchmarks import (
-    auto_arima_nixtla,
-    ets_model,
-    run_benchmark_comparison,
-    run_model_comparison,
-    seasonal_naive,
-    summary_table,
-)
 
 # data_loader is available as boa_forecaster.data_loader.load_data
 # (not re-exported at top level since it requires an Excel file path)

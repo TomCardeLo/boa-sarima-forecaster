@@ -239,7 +239,6 @@ def test_expanding_mean_causal(monthly_series):
     )
     fe = FeatureEngineer(config)
     X, _ = fe.fit_transform(monthly_series)
-    max_lag = 1
     # expanding_mean at X row 0 (series index 1) = mean(series[0])
     expected = monthly_series.iloc[0]
     assert np.isclose(X["expanding_mean"].iloc[0], expected)

@@ -11,7 +11,6 @@ from boa_forecaster.models.base import (
     IntParam,
     ModelSpec,
     OptimizationResult,
-    SearchSpaceParam,
     suggest_from_space,
 )
 

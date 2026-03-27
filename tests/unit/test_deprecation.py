@@ -1,4 +1,5 @@
 """Tests that sarima_bayes emits DeprecationWarning and preserves backward compat."""
+
 import importlib
 import sys
 import warnings

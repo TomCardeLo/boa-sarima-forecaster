@@ -43,9 +43,7 @@ def _make_series(n: int = 60, seed: int = 0) -> pd.Series:
     return pd.Series(values, index=index)
 
 
-def _make_group_df(
-    n: int = 60, groups: list[str] | None = None
-) -> pd.DataFrame:
+def _make_group_df(n: int = 60, groups: list[str] | None = None) -> pd.DataFrame:
     """Multi-group DataFrame usable with run_model_comparison."""
     if groups is None:
         groups = ["A"]
@@ -136,9 +134,6 @@ class TestAutoArimaNixtla:
 
     def test_fallback_when_statsforecast_unavailable(self, monkeypatch, long_series):
         """Simulate missing statsforecast → must fall back, not raise."""
-        import boa_forecaster.benchmarks as bm
-
-        original = bm.auto_arima_nixtla
 
         def _patched(train, forecast_horizon, m=12, freq="MS"):
             # Directly exercise the except branch by raising ImportError.
@@ -337,9 +332,15 @@ class TestSummaryTable:
         """Synthetic fold-level results with optimised + baseline models."""
         groups = ["A", "A", "A", "A", "A", "A", "A", "A", "A"]
         models = [
-            "sarima", "sarima", "sarima",
-            "seasonal_naive", "seasonal_naive", "seasonal_naive",
-            "ETS", "ETS", "ETS",
+            "sarima",
+            "sarima",
+            "sarima",
+            "seasonal_naive",
+            "seasonal_naive",
+            "seasonal_naive",
+            "ETS",
+            "ETS",
+            "ETS",
         ]
         optimized = [True, True, True, False, False, False, False, False, False]
         smapes = [0.05, 0.06, 0.04, 0.10, 0.12, 0.09, 0.08, 0.09, 0.07]
@@ -516,7 +517,9 @@ class TestRunBenchmarkComparisonV1Compat:
                 test_size=6,
                 min_train_size=24,
             )
-        baseline_rows = result[result["model"].isin(["seasonal_naive", "ETS", "AutoARIMA"])]
+        baseline_rows = result[
+            result["model"].isin(["seasonal_naive", "ETS", "AutoARIMA"])
+        ]
         assert (baseline_rows["optimized"] == False).all()  # noqa: E712
 
     def test_four_models_present(self, group_df, sarima_fn):

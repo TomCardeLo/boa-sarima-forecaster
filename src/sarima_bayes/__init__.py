@@ -23,8 +23,8 @@ warnings.warn(
     stacklevel=2,
 )
 
-from boa_forecaster import *  # noqa: F401, F403
-from boa_forecaster import (  # noqa: F401 — explicit re-exports for tooling
+from boa_forecaster import *  # noqa: E402, F401, F403
+from boa_forecaster import (  # noqa: E402, F401 — explicit re-exports for tooling
     METRIC_REGISTRY,
     build_combined_metric,
     combined_metric,

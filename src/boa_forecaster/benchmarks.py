@@ -270,7 +270,9 @@ def run_model_comparison(
         # ── Bayesian-optimised models ─────────────────────────────────────
         for spec in model_specs:
             try:
-                result = optimize_model(series, spec, n_calls=n_calls_per_model, seed=seed)
+                result = optimize_model(
+                    series, spec, n_calls=n_calls_per_model, seed=seed
+                )
                 forecaster = spec.build_forecaster(result.best_params)
                 fold_df = walk_forward_validation(
                     series,
@@ -462,9 +464,7 @@ def summary_table(results_df: pd.DataFrame, group_cols: list[str]) -> pd.DataFra
 
     # Carry over the `optimized` flag (first value per model is deterministic)
     if "optimized" in results_df.columns:
-        opt_map = (
-            results_df.groupby("model")["optimized"].first().reset_index()
-        )
+        opt_map = results_df.groupby("model")["optimized"].first().reset_index()
         agg = agg.merge(opt_map, on="model", how="left")
 
     # beats_naive: compare sMAPE_mean against seasonal_naive per group
