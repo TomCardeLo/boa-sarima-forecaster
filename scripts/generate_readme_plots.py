@@ -40,7 +40,9 @@ noise = rng.normal(0, 8, n_hist + n_fore)
 values = np.maximum(100 + trend + seasonal + noise, 0)
 
 dates_hist = pd.date_range("2020-01-01", periods=n_hist, freq="MS")
-dates_fore = pd.date_range(dates_hist[-1] + pd.DateOffset(months=1), periods=n_fore, freq="MS")
+dates_fore = pd.date_range(
+    dates_hist[-1] + pd.DateOffset(months=1), periods=n_fore, freq="MS"
+)
 
 hist = pd.Series(values[:n_hist], index=dates_hist)
 fore_mean = values[n_hist:]
@@ -54,13 +56,34 @@ ci80_hi = fore_mean + 1.28 * sigma
 
 fig, ax = plt.subplots(figsize=(10, 5), dpi=150)
 
-ax.plot(hist.index, hist.values, color="#1f4e79", linewidth=1.8, label="Historical (actuals)")
-ax.plot(dates_fore, fore_mean, color="#e06c00", linewidth=2.0, linestyle="--", label="SARIMA+BO forecast")
-ax.fill_between(dates_fore, ci95_lo, ci95_hi, color="#e06c00", alpha=0.12, label="95% CI")
-ax.fill_between(dates_fore, ci80_lo, ci80_hi, color="#e06c00", alpha=0.25, label="80% CI")
+ax.plot(
+    hist.index,
+    hist.values,
+    color="#1f4e79",
+    linewidth=1.8,
+    label="Historical (actuals)",
+)
+ax.plot(
+    dates_fore,
+    fore_mean,
+    color="#e06c00",
+    linewidth=2.0,
+    linestyle="--",
+    label="SARIMA+BO forecast",
+)
+ax.fill_between(
+    dates_fore, ci95_lo, ci95_hi, color="#e06c00", alpha=0.12, label="95% CI"
+)
+ax.fill_between(
+    dates_fore, ci80_lo, ci80_hi, color="#e06c00", alpha=0.25, label="80% CI"
+)
 ax.axvline(x=dates_hist[-1], color="#888888", linewidth=1.0, linestyle=":")
 
-ax.set_title("Forecast vs Actuals — SARIMA + Bayesian Optimization", fontsize=13, fontweight="bold")
+ax.set_title(
+    "Forecast vs Actuals — SARIMA + Bayesian Optimization",
+    fontsize=13,
+    fontweight="bold",
+)
 ax.set_xlabel("Date")
 ax.set_ylabel("Demand (units)")
 ax.legend(loc="upper left", fontsize=9)
@@ -85,14 +108,27 @@ bars = ax.barh(models, smape, color=colors, edgecolor="white", height=0.6)
 
 # Value labels
 for bar, val in zip(bars, smape):
-    ax.text(val + 0.15, bar.get_y() + bar.get_height() / 2,
-            f"{val:.1f}%", va="center", fontsize=9)
+    ax.text(
+        val + 0.15,
+        bar.get_y() + bar.get_height() / 2,
+        f"{val:.1f}%",
+        va="center",
+        fontsize=9,
+    )
 
 # Naïve reference line
-ax.axvline(x=naive_value, color="#e06c00", linewidth=1.5, linestyle="--", label=f"Seasonal Naïve ({naive_value}%)")
+ax.axvline(
+    x=naive_value,
+    color="#e06c00",
+    linewidth=1.5,
+    linestyle="--",
+    label=f"Seasonal Naïve ({naive_value}%)",
+)
 
 ax.set_xlabel("sMAPE (%)")
-ax.set_title("Model Comparison — sMAPE (lower is better)", fontsize=13, fontweight="bold")
+ax.set_title(
+    "Model Comparison — sMAPE (lower is better)", fontsize=13, fontweight="bold"
+)
 ax.set_xlim(0, naive_value + 3)
 ax.legend(fontsize=9)
 plt.tight_layout()
