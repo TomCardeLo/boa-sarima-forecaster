@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, Union, runtime_checkable
+from typing import TYPE_CHECKING, Callable, Protocol, Union, runtime_checkable
 
 import joblib
 import optuna
@@ -90,7 +90,9 @@ class OptimizationResult:
 # ── Helper ────────────────────────────────────────────────────────────────────
 
 
-def suggest_from_space(trial: optuna.Trial, search_space: dict) -> dict:
+def suggest_from_space(
+    trial: optuna.Trial, search_space: dict[str, SearchSpaceParam]
+) -> dict[str, object]:
     """Translate a ``search_space`` dict into Optuna trial suggestions.
 
     Args:
@@ -108,7 +110,7 @@ def suggest_from_space(trial: optuna.Trial, search_space: dict) -> dict:
         ``IntParam``.  When ``IntParam.log is True`` the ``step`` field is
         silently ignored so the call does not raise.
     """
-    params: dict = {}
+    params: dict[str, object] = {}
     for name, param in search_space.items():
         if isinstance(param, IntParam):
             if param.log:
@@ -190,4 +192,4 @@ class ModelSpec(Protocol):
         self,
         params: dict,
         feature_config: FeatureConfig | None = None,
-    ): ...
+    ) -> Callable[[pd.Series], pd.Series]: ...
