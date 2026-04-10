@@ -79,7 +79,7 @@ def _validate_series(series: pd.Series, min_length: int = _MIN_SERIES_LENGTH) ->
             "series contains NaN values. "
             "Handle missing values before calling optimize_model()."
         )
-    if np.isinf(series.to_numpy()).any():
+    if series.isin([np.inf, -np.inf]).any():
         raise ValueError(
             "series contains Inf values. "
             "Remove or replace infinite values before calling optimize_model()."

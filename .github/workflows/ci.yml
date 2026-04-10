@@ -35,7 +35,12 @@ jobs:
         run: black --check .
 
       - name: Run tests
-        run: pytest tests/ -v --tb=short --cov=src/boa_forecaster --cov-report=term-missing
+        run: |
+          pytest tests/ -v --tb=short \
+            --cov=src/boa_forecaster \
+            --cov-report=term-missing \
+            --cov-fail-under=80 \
+            --cov-config=.coveragerc-core
 
   test-ml-extras:
     runs-on: ubuntu-latest
@@ -55,4 +60,4 @@ jobs:
           pip install pytest-cov
 
       - name: Run tests
-        run: pytest tests/ -v --tb=short --cov=src/boa_forecaster --cov-report=term-missing
+        run: pytest tests/ -v --tb=short --cov=src/boa_forecaster --cov-report=term-missing --cov-fail-under=80
