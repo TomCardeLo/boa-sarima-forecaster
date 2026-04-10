@@ -26,7 +26,7 @@ def walk_forward_validation(
     n_folds: int = 3,
     test_size: int = 12,
     min_train_size: int = 24,
-    metrics_fn: dict[str, Callable] | None = None,
+    metrics_fn: dict[str, Callable[..., float]] | None = None,
 ) -> pd.DataFrame:
     """Evaluate *model_fn* using an expanding-window walk-forward scheme.
 
