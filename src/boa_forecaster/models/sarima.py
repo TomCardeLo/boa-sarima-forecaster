@@ -9,6 +9,7 @@ from ``boa_forecaster.models.sarima``.
 from __future__ import annotations
 
 import logging
+import warnings
 
 import numpy as np
 import optuna
@@ -45,6 +46,9 @@ class SARIMASpec:
 
     name = "sarima"
     needs_features = False
+
+    MAX_NON_SEASONAL_ORDER: int = 4  # max(p + q) complexity constraint
+    MAX_SEASONAL_ORDER: int = 3  # max(P + Q) seasonal complexity constraint
 
     def __init__(
         self,
@@ -127,7 +131,7 @@ class SARIMASpec:
         p, d, q = params["p"], params["d"], params["q"]
         P, D, Q = params["P"], params["D"], params["Q"]
 
-        if (p + q) > 4 or (P + Q) > 3:
+        if (p + q) > self.MAX_NON_SEASONAL_ORDER or (P + Q) > self.MAX_SEASONAL_ORDER:
             return OPTIMIZER_PENALTY
 
         data = series.values if isinstance(series, pd.Series) else np.asarray(series)
@@ -198,13 +202,18 @@ def pred_arima(
 ) -> tuple[pd.DataFrame, pd.DataFrame | None, tuple, tuple | None, pd.Series | None]:
     """Fit a SARIMA model and produce a multi-step forecast.
 
-    Port of ``sarima_bayes.model.pred_arima``.  See that module for the full
-    docstring.
+    .. deprecated:: 2.0.0
+        Use ``SARIMASpec`` with ``optimize_model`` instead.
 
     Returns:
         5-tuple ``(forecast_df, conf_int, order, s_order, forecast_series)``.
         On failure returns ``(empty_df, None, order, s_order, None)``.
     """
+    warnings.warn(
+        "pred_arima is deprecated since v2.0. Use SARIMASpec with optimize_model instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     try:
         series = bd.set_index(col_x)[col_y].asfreq(freq)
         model = SARIMAX(
@@ -251,13 +260,18 @@ def forecast_arima(
 ) -> pd.DataFrame:
     """Fit SARIMA and return a tidy forecast DataFrame.
 
-    Port of ``sarima_bayes.model.forecast_arima``.  See that module for the
-    full docstring.
+    .. deprecated:: 2.0.0
+        Use ``SARIMASpec`` with ``optimize_model`` instead.
 
     Returns:
         DataFrame with columns ``["Date", "Pred", "Country", "Sku"]``.
         Returns an empty DataFrame on failure.
     """
+    warnings.warn(
+        "forecast_arima is deprecated since v2.0. Use SARIMASpec with optimize_model instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     try:
         s_order = (P, D, Q, m) if m is not None else None
         forecast_df, _, _, _, _ = pred_arima(

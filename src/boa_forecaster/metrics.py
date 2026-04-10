@@ -20,9 +20,12 @@ can use ``0.6 × MAE + 0.4 × RMSE``.
 
 from __future__ import annotations
 
+import threading
 from typing import Callable
 
 import numpy as np
+
+_registry_lock = threading.Lock()
 
 
 def smape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -214,6 +217,12 @@ METRIC_REGISTRY: dict[str, Callable[[np.ndarray, np.ndarray], float]] = {
     "rmse": rmse,
     "mape": mape,
 }
+
+
+def register_metric(name: str, fn: Callable[[np.ndarray, np.ndarray], float]) -> None:
+    """Thread-safe registration of a custom metric into ``METRIC_REGISTRY``."""
+    with _registry_lock:
+        METRIC_REGISTRY[name] = fn
 
 
 def build_combined_metric(
