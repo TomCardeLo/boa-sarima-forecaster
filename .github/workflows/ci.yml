@@ -5,9 +5,14 @@ on:
     branches: ["main", "master"]
   pull_request:
     branches: ["main", "master"]
+  schedule:
+    # Weekly slow-test run — Mondays 06:00 UTC.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 jobs:
   test-core-only:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -34,6 +39,10 @@ jobs:
       - name: Check formatting with black
         run: black --check .
 
+      - name: Type check with mypy
+        if: matrix.python-version == '3.11'
+        run: python -m mypy src/boa_forecaster
+
       - name: Run tests
         run: |
           pytest tests/ -v --tb=short \
@@ -43,6 +52,7 @@ jobs:
             --cov-config=.coveragerc-core
 
   test-ml-extras:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
@@ -61,3 +71,29 @@ jobs:
 
       - name: Run tests
         run: pytest tests/ -v --tb=short --cov=src/boa_forecaster --cov-report=term-missing --cov-fail-under=80
+
+  test-slow:
+    # Weekly performance / slow-suite sanity — not run on push/PR to keep
+    # those pipelines fast. Deselected elsewhere via `pytest -m "not slow"`
+    # on a default run; here we *select* `-m slow` to catch perf regressions
+    # (e.g. the 30s budget in test_optimizer_stress.py) and exercise the
+    # statsforecast-backed benchmark paths that are too slow for every push.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (with ML extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,ml]"
+
+      - name: Run slow tests
+        run: pytest tests/ -v --tb=short -m slow --durations=10

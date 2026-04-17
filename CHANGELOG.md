@@ -7,6 +7,219 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.0] — Unreleased
+
+First major release on the new multi-model framework line.  Renames the
+package from `sarima_bayes` → `boa_forecaster`, opens the optimisation
+engine to any `ModelSpec`, and ships the full Phase A–E improvement
+plan (perf, tests, code quality, CI, docs).
+
+> **Migration note.**  `import sarima_bayes` continues to work via a
+> compatibility shim that re-exports the entire `boa_forecaster` API
+> and emits a `DeprecationWarning` on import.  `pred_arima`,
+> `forecast_arima`, and `optimize_arima` also keep working but warn —
+> they will be removed in v3.0.
+
+### Added — Multi-model framework
+
+- **Pluggable `ModelSpec` `Protocol`** lets the same generic
+  `optimize_model(series, spec)` engine drive SARIMA, Random Forest,
+  XGBoost, LightGBM, and any user-defined spec.  See
+  [ADR-001](docs/adr/ADR-001-modelspec-protocol.md).
+  - `models/base.py` — `ModelSpec` Protocol, `OptimizationResult`,
+    parameter descriptors (`IntParam`, `FloatParam`, `CategoricalParam`),
+    `suggest_from_space` helper.
+  - `models/sarima.py` — `SARIMASpec` (statsmodels SARIMAX).
+  - `models/random_forest.py` — `RandomForestSpec` (scikit-learn).
+  - `models/xgboost.py` — `XGBoostSpec` (optional `xgboost` extra).
+  - `models/lightgbm.py` — `LightGBMSpec` (optional `lightgbm` extra).
+  - `models/__init__.py` — `MODEL_REGISTRY` for config-driven selection.
+- **`BaseMLSpec`** (`src/boa_forecaster/models/_ml_base.py`) — shared
+  abstract base for tree-based ML specs.  Factors out the CV loop,
+  recursive forecaster, and default `suggest_params`; subclasses
+  override only `_fit_final`, `search_space`, and `warm_starts`.
+  Removes ~329 lines of duplication across `RandomForestSpec`,
+  `XGBoostSpec`, and `LightGBMSpec`.
+- **Feature engineering for tabular ML** (`features.py`) —
+  `FeatureConfig` + `FeatureEngineer`.  Generates lag, rolling,
+  calendar, trend, and (optional) expanding features with shift-based
+  temporal integrity (no look-ahead).
+- **Walk-forward `validate_by_group`** — runs walk-forward CV per
+  `(Country, SKU)` group with the v2 spec interface.
+- **Multi-model `run_model_comparison`** — head-to-head comparison
+  across any subset of registered specs; legacy
+  `run_benchmark_comparison` retained as an alias.
+- **Public API consolidation** — `optimize_model`, `optimize_arima`,
+  `forecast_arima`, `pred_arima`, all metrics, validation helpers,
+  benchmark utilities, and every `ModelSpec` class re-exported from
+  `boa_forecaster.__init__`.
+
+### Added — Reliability & observability
+
+- **`OptimizationResult.is_fallback: bool`** — distinguishes a genuine
+  optimum from a warm-start returned after a study-level crash;
+  defaults to `False` for backward compatibility.  Crash now logs at
+  `WARNING` with `exc_info=True` instead of being silently swallowed.
+  See [ADR-002](docs/adr/ADR-002-optimizer-soft-failure.md).
+- **Thread-safe `METRIC_REGISTRY`** — `register_metric` wraps
+  registration in a `threading.Lock`.
+- **`SARIMASpec.MAX_NON_SEASONAL_ORDER` / `MAX_SEASONAL_ORDER` named
+  constants** replacing magic `4` / `3` thresholds.  Constraint
+  violations now return `OPTIMIZER_PENALTY` so TPE learns to avoid them.
+
+### Added — Tests
+
+- **SARIMA constraint enforcement tests**
+  (`tests/unit/test_sarima_constraints.py`).
+- **Feature-leakage regression tests** (`tests/unit/test_features.py`)
+  — assert no `t ≥ now` value appears in the feature row at position
+  `t`.
+- **Benchmark silent-failure tests** (`tests/unit/test_benchmarks.py`,
+  `test_benchmarks_v2.py`) — mock ETS / AutoARIMA exceptions and
+  assert seasonal-naive fallback.
+- **Full-pipeline integration test**
+  (`tests/integration/test_full_pipeline.py`) — exercises
+  `data_loader → clean_zeros → fill_blanks → weighted_moving_stats_series
+  → optimize_model → build_forecaster → walk_forward_validation` on
+  both SARIMA and Random Forest branches, with a real Excel fixture
+  including a zero-demand SKU and an injected outlier.
+- **Property-based metric tests**
+  (`tests/unit/test_metrics_property.py`) — 19 Hypothesis tests
+  covering sMAPE / RMSLE / MAE / RMSE invariants (bounds, symmetry,
+  identity, Jensen), `combined_metric` linearity, and
+  `build_combined_metric` weight monotonicity.  Uses `deadline=None`
+  for Windows CI stability.
+- **Optimizer stress test** (`tests/unit/test_optimizer_stress.py`)
+  — `@pytest.mark.slow`, runs `optimize_model` on a 500-point monthly
+  series with 5 trials and asserts completion under a 30 s budget.
+
+### Added — CI & tooling
+
+- **`mypy` static type checking** — new CI step on the Python 3.11
+  matrix entry runs `python -m mypy src/boa_forecaster`.
+  `pyproject.toml` pins `python_version = "3.9"` so 3.9-incompatible
+  typing is caught (e.g. PEP 604 `X | Y` in value position).
+- **Weekly slow-test job** (`test-slow` in `.github/workflows/ci.yml`)
+  — Mondays 06:00 UTC, Python 3.11 with `[dev,ml]` extras, runs
+  `pytest -m slow --durations=10` with a 20-min timeout.  Existing
+  push/PR jobs gated to those triggers only.
+- **Coverage threshold `--cov-fail-under=80`** enforced in CI for both
+  `test-core-only` and `test-ml-extras` jobs.
+- **`hypothesis>=6.0`** added to `[dev]` extras.
+
+### Added — Documentation
+
+- **Architecture Decision Records** (`docs/adr/`) — ADR-001
+  (`ModelSpec` as `Protocol`, not `ABC`), ADR-002 (optimizer
+  soft-failure contract), ADR-003 (default
+  `0.7·sMAPE + 0.3·RMSLE` objective).
+- **Extension guide** (`docs/extending_models.md`) — end-to-end
+  walkthrough for adding a new `ModelSpec`, with a worked Prophet
+  example, the tree-model `BaseMLSpec` shortcut, a test checklist,
+  and a pitfalls table.
+- **Type-annotation completeness pass** across `models/base.py`,
+  `validation.py`, `features.py`, `data_loader.py`.
+- **Documented rationale for decaying weights `[0.3, 0.2, 0.1]`** in
+  `standardization.py`.
+
+### Changed — Performance
+
+- **`weighted_moving_stats` vectorised** — new
+  `weighted_moving_stats_series(sales_data, window_size, threshold)`
+  helper uses `np.lib.stride_tricks.sliding_window_view` to compute
+  rolling means and standard deviations in O(n) instead of
+  O(n · window).  Mathematically identical output; **18–130× faster**
+  depending on series length.  The legacy row-by-row entry point
+  remains available for callers that genuinely need it.
+- **`fill_blanks` vectorised** — replaced the cross-join + merge with
+  a `pd.MultiIndex.from_product([dates, groups])` + `reindex`
+  pipeline.  ~1.2–1.5× faster, lower peak memory.  **Behaviour
+  change:** duplicate `(date, group)` rows in the input are now
+  summed before reindexing (previously they were silently duplicated
+  in the output).  Pipelines that run `clean_zeros` first are
+  unaffected, since `clean_zeros` removes duplicates upstream.
+- **`recursive_forecast` pre-allocates** the extended series instead
+  of growing it via `pd.concat` in a loop.  5–20× speedup on long
+  horizons.
+- **`optimizer._validate_series` early-exits** via
+  `series.isin([np.inf, -np.inf]).any()` instead of materialising a
+  full boolean array via `np.isinf`.
+
+### Changed — Defaults
+
+- **CI matrix expanded** — Python 3.9 / 3.10 / 3.11 for core,
+  Python 3.11 with `[dev,ml]` for ML-extras job.
+- **Optimizer crash visibility** — `optimize_model` upgraded from a
+  silent fallback to a `WARNING`-logged fallback with the
+  `is_fallback=True` flag.  See ADR-002.
+
+### Deprecated
+
+- **`pred_arima` and `forecast_arima`** in
+  `boa_forecaster.models.sarima` emit `DeprecationWarning` on call.
+  Will be removed in v3.0.  Use `SARIMASpec` with `optimize_model`
+  instead.
+- **`optimize_arima`** — emits `DeprecationWarning`; use
+  `optimize_model(series, SARIMASpec(...))`.
+- **`sarima_bayes` package** — emits `DeprecationWarning` on import;
+  re-exports everything from `boa_forecaster`.
+
+### Fixed
+
+- Six latent type-checker issues surfaced by the new mypy CI step:
+  `_n_train` narrowing in `features.py` (×2), callbacks list type and
+  `Callable` / `Any` imports in `lightgbm.py`, `weight_sum` float
+  cast and empty-`ndarray` annotation in `standardization.py`, and a
+  `date_values` `ndarray` annotation in `preprocessor.py`.
+
+[2.0.0]: https://github.com/TomCardeLo/boa-sarima-forecaster/compare/v1.4.0...v2.0.0
+
+---
+
+## [1.4.0] — 2026-03-24
+
+### Added
+
+- **Optional `Country` and `SKU` columns** — the loader, preprocessor,
+  optimiser, and validator now accept flat single-series workbooks
+  without group columns.  `group_cols=None` falls back to a single
+  ungrouped pipeline.
+
+### Removed
+
+- **`merge_representatives` helper** — superseded by direct group
+  selection in `validate_by_group`.
+
+[1.4.0]: https://github.com/TomCardeLo/boa-sarima-forecaster/compare/v1.3.0...v1.4.0
+
+---
+
+## [1.3.0] — 2026-03-24
+
+### Added
+
+- **Configurable metric composition** — `build_combined_metric(components)`
+  factory accepts any list of `{"metric": str, "weight": float}` dicts
+  drawn from `METRIC_REGISTRY` (`smape`, `rmsle`, `mae`, `rmse`,
+  `mape`).  The optimisation objective can now be tuned per call or per
+  config without touching source code.
+- **`metrics` section in `config.example.yaml`** — declarative
+  composition consumed by `optimize_model` / `optimize_arima`.
+- **`mae`, `rmse`, `mape`** — newly exposed in `metrics.py` alongside
+  the original `smape` / `rmsle` / `combined_metric`.
+
+### Changed
+
+- **`optimize_arima` / `optimize_model`** — both now accept a
+  `metric_components` keyword that overrides the default
+  `0.7·sMAPE + 0.3·RMSLE` mix.
+- **`README.md`** — documents the metric registry and configuration
+  examples for revenue and price use cases.
+
+[1.3.0]: https://github.com/TomCardeLo/boa-sarima-forecaster/compare/v1.2.0...v1.3.0
+
+---
+
 ## [1.2.0] — 2026-03-23
 
 ### Added

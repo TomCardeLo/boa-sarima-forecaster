@@ -70,12 +70,31 @@ SearchSpaceParam = Union[IntParam, FloatParam, CategoricalParam]
 
 @dataclass
 class OptimizationResult:
-    """Returned by ``optimize_model`` after TPE search completes."""
+    """Returned by ``optimize_model`` after TPE search completes.
+
+    Attributes
+    ----------
+    best_params
+        Best hyper-parameters found by the search, or the first ``warm_starts``
+        entry (or ``{}``) when ``is_fallback`` is ``True``.
+    best_score
+        Best metric value, or ``OPTIMIZER_PENALTY`` when ``is_fallback`` is ``True``.
+    n_trials
+        Number of completed trials, or ``0`` when ``is_fallback`` is ``True``.
+    model_name
+        Name of the ``ModelSpec`` that was optimised.
+    is_fallback
+        ``True`` when the Optuna study crashed and this result carries default
+        (warm-start) parameters and ``OPTIMIZER_PENALTY`` instead of real search
+        output.  Callers that need to distinguish a successful optimisation
+        from a soft-failure should branch on this flag.
+    """
 
     best_params: dict
     best_score: float
     n_trials: int
     model_name: str
+    is_fallback: bool = False
 
     def save(self, path: str | Path) -> None:
         """Persist this result to *path* using joblib serialisation."""
