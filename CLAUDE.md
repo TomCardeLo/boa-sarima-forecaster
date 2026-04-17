@@ -91,6 +91,7 @@ Pipeline stages:
 - `weighted_moving_stats_series(sales_data, window_size=3, threshold=2.5)` — vectorised O(n) bulk version; returns `(means, stds, clipped)` as three `np.ndarray`. Prefer this over looping `weighted_moving_stats`: ~18–130× faster (scales with series length). Mathematically equivalent.
 - The `m` (seasonal period) is **fixed** at 12 for monthly data and is not part of the Optuna search space. Set it via `SARIMASpec(seasonal_period=12)`.
 - `optimize_model(series, model_spec, n_trials=50)` — v2.0 generic entry point. `model_spec` is any `ModelSpec` instance (e.g. `SARIMASpec()`, `RandomForestSpec()`). Returns `OptimizationResult`.
+- `OptimizationResult.is_fallback` — `True` when the Optuna study crashed and the result carries default (first warm-start) params + `OPTIMIZER_PENALTY` instead of real search output. Callers that need to distinguish a genuine optimum from a soft-failure should check this flag; the crash is also logged at `WARNING` level with traceback.
 - `fill_blanks(df, date_col, group_cols, value_col, end_date, freq)` — reindex-based (MultiIndex + `np.repeat`/`np.tile`), no cross-join merge. **Duplicate `(date, group)` rows in the input are summed** before reindexing; in a pipeline that runs `clean_zeros` first, no duplicates exist so this is a no-op.
 
 ## Configuration

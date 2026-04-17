@@ -105,6 +105,52 @@ def test_soft_failure_no_exception(synthetic_series):
     assert result.best_score == OPTIMIZER_PENALTY
 
 
+def test_success_path_is_not_fallback(synthetic_series):
+    """A normal optimisation run must set is_fallback=False."""
+    result = optimize_model(synthetic_series, MockModelSpec(), n_calls=3)
+    assert result.is_fallback is False
+
+
+def test_study_crash_sets_is_fallback(synthetic_series, monkeypatch, caplog):
+    """When study.optimize raises, is_fallback=True and score=PENALTY."""
+
+    def _boom(self, *args, **kwargs):
+        raise RuntimeError("forced study failure")
+
+    monkeypatch.setattr(optuna.study.Study, "optimize", _boom)
+
+    with caplog.at_level("WARNING", logger="boa_forecaster.optimizer"):
+        result = optimize_model(synthetic_series, MockModelSpec(), n_calls=3)
+
+    assert result.is_fallback is True
+    assert result.best_score == OPTIMIZER_PENALTY
+    assert result.n_trials == 0
+    # Fallback params = first warm_start entry (MockModelSpec: {"k": 5})
+    assert result.best_params == {"k": 5}
+    # Crash is logged at WARNING level so it is surfaced by default handlers.
+    assert any("failed" in rec.message for rec in caplog.records)
+
+
+def test_study_crash_with_no_warm_starts_has_empty_fallback(
+    synthetic_series, monkeypatch
+):
+    """If a spec has no warm_starts, the fallback best_params is {}."""
+
+    class _NoWarmStartSpec(MockModelSpec):
+        @property
+        def warm_starts(self):
+            return []
+
+    def _boom(self, *args, **kwargs):
+        raise RuntimeError("forced study failure")
+
+    monkeypatch.setattr(optuna.study.Study, "optimize", _boom)
+
+    result = optimize_model(synthetic_series, _NoWarmStartSpec(), n_calls=3)
+    assert result.is_fallback is True
+    assert result.best_params == {}
+
+
 def test_seed_produces_reproducible_results(synthetic_series):
     spec = MockModelSpec()
     r1 = optimize_model(synthetic_series, spec, n_calls=5, seed=0)

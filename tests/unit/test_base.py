@@ -104,6 +104,27 @@ def test_optimization_result_fields():
     assert r.model_name == "sarima"
 
 
+def test_optimization_result_is_fallback_defaults_false():
+    r = OptimizationResult(
+        best_params={"p": 1},
+        best_score=0.5,
+        n_trials=10,
+        model_name="sarima",
+    )
+    assert r.is_fallback is False
+
+
+def test_optimization_result_is_fallback_true_when_set():
+    r = OptimizationResult(
+        best_params={},
+        best_score=1e6,
+        n_trials=0,
+        model_name="sarima",
+        is_fallback=True,
+    )
+    assert r.is_fallback is True
+
+
 def test_optimization_result_save_load_roundtrip(tmp_path):
     r = OptimizationResult(
         best_params={"p": 2, "d": 1, "q": 1},
@@ -118,6 +139,21 @@ def test_optimization_result_save_load_roundtrip(tmp_path):
     assert loaded.best_score == r.best_score
     assert loaded.n_trials == r.n_trials
     assert loaded.model_name == r.model_name
+    assert loaded.is_fallback == r.is_fallback
+
+
+def test_optimization_result_save_load_preserves_is_fallback(tmp_path):
+    r = OptimizationResult(
+        best_params={"k": 1},
+        best_score=1e6,
+        n_trials=0,
+        model_name="mock",
+        is_fallback=True,
+    )
+    path = tmp_path / "fallback.joblib"
+    r.save(path)
+    loaded = OptimizationResult.load(path)
+    assert loaded.is_fallback is True
 
 
 def test_optimization_result_save_creates_file(tmp_path):
