@@ -1,22 +1,18 @@
 """RandomForestSpec — scikit-learn Random Forest plugin for boa-forecaster v2.0.
 
-Implements the ``ModelSpec`` protocol for recursive multi-step forecasting
-with ``RandomForestRegressor``.  Feature engineering is delegated to
-``FeatureEngineer``; the recursive forecasting strategy predicts one step at a
-time, appends the prediction to the series, and repeats for the full horizon.
+Implements the ``ModelSpec`` protocol (via ``BaseMLSpec``) for recursive
+multi-step forecasting with ``RandomForestRegressor``.  Feature engineering
+is delegated to ``FeatureEngineer``; forecasting predicts one step at a time,
+appends the prediction to the series, and repeats for the full horizon.
 
 Temporal integrity
 ------------------
-A fresh ``FeatureEngineer`` instance is created per cross-validation fold so
-that rolling/expanding stats are fitted *only* on the training window of that
-fold.  No test-set information leaks into the features.
+See ``BaseMLSpec`` — a fresh ``FeatureEngineer`` per CV fold prevents any
+test-set information from leaking into the features.
 """
 
 from __future__ import annotations
 
-import logging
-
-import numpy as np
 import pandas as pd
 
 try:
@@ -26,28 +22,16 @@ try:
 except ImportError:
     HAS_SKLEARN = False
 
-from boa_forecaster.config import OPTIMIZER_PENALTY
-from boa_forecaster.features import FeatureConfig, FeatureEngineer
-from boa_forecaster.models._utils import (
-    MIN_TRAIN_SIZE as _MIN_TRAIN_SIZE,
-)
-from boa_forecaster.models._utils import (
-    N_CV_FOLDS as _N_CV_FOLDS,
-)
-from boa_forecaster.models._utils import (
-    recursive_forecast as _recursive_forecast,
-)
+from boa_forecaster.models._ml_base import BaseMLSpec
 from boa_forecaster.models.base import (
     CategoricalParam,
     FloatParam,
     IntParam,
-    suggest_from_space,
+    SearchSpaceParam,
 )
 
-logger = logging.getLogger(__name__)
 
-
-class RandomForestSpec:
+class RandomForestSpec(BaseMLSpec):
     """``ModelSpec`` implementation for scikit-learn ``RandomForestRegressor``.
 
     Hyperparameter optimisation via Optuna TPE; forecasting via recursive
@@ -65,25 +49,18 @@ class RandomForestSpec:
     """
 
     name: str = "random_forest"
-    needs_features: bool = True
 
-    def __init__(
-        self,
-        feature_config: FeatureConfig | None = None,
-        forecast_horizon: int = 12,
-    ) -> None:
+    # ── Subclass hooks ────────────────────────────────────────────────────────
+
+    def _check_availability(self) -> None:
         if not HAS_SKLEARN:
             raise ImportError(
                 "scikit-learn is required for RandomForestSpec. "
                 "Install it with: pip install scikit-learn>=1.3"
             )
-        self.feature_config: FeatureConfig = feature_config or FeatureConfig()
-        self.forecast_horizon: int = forecast_horizon
-
-    # ── ModelSpec protocol ────────────────────────────────────────────────────
 
     @property
-    def search_space(self) -> dict:
+    def search_space(self) -> dict[str, SearchSpaceParam]:
         """Hyperparameter search space for ``RandomForestRegressor``."""
         return {
             "n_estimators": IntParam(50, 500, log=True),
@@ -113,104 +90,15 @@ class RandomForestSpec:
             },
         ]
 
-    def suggest_params(self, trial) -> dict:
-        """Sample a point from ``search_space`` via Optuna trial suggestions."""
-        return suggest_from_space(trial, self.search_space)
-
-    def evaluate(
-        self,
-        series: pd.Series,
-        params: dict,
-        metric_fn,
-        feature_config: FeatureConfig | None = None,
-    ) -> float:
-        """Evaluate *params* via 3-fold expanding-window CV.
-
-        Each fold fits a fresh ``FeatureEngineer`` on the training window only,
-        trains a ``RandomForestRegressor``, then forecasts recursively over the
-        test window.
-
-        Args:
-            series: Monthly time series with ``DatetimeIndex``.
-            params: Hyperparameter dict sampled from ``search_space``.
-            metric_fn: ``metric_fn(y_true, y_pred) -> float`` objective.
-            feature_config: Override for this evaluation only.
-
-        Returns:
-            Mean metric across valid folds, or ``OPTIMIZER_PENALTY`` on failure.
-        """
-        config = feature_config or self.feature_config
-        n = len(series)
-        horizon = self.forecast_horizon
-
-        scores: list[float] = []
-        for k in range(_N_CV_FOLDS):
-            train_end = n - horizon * (k + 1)
-            if train_end < _MIN_TRAIN_SIZE:
-                break
-
-            train = series.iloc[:train_end]
-            test = series.iloc[train_end : train_end + horizon]
-            if len(test) < horizon:
-                break
-
-            try:
-                fe = FeatureEngineer(config)
-                X_train, y_train = fe.fit_transform(train)
-                rf = RandomForestRegressor(
-                    n_estimators=params["n_estimators"],
-                    max_depth=params["max_depth"],
-                    min_samples_split=params["min_samples_split"],
-                    min_samples_leaf=params["min_samples_leaf"],
-                    max_features=params["max_features"],
-                    random_state=42,
-                    n_jobs=1,
-                )
-                rf.fit(X_train, y_train)
-                y_pred = _recursive_forecast(rf, fe, train, len(test))
-                scores.append(metric_fn(test.values, y_pred.values))
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("RandomForestSpec.evaluate fold %d failed: %s", k + 1, exc)
-                return OPTIMIZER_PENALTY
-
-        if not scores:
-            return OPTIMIZER_PENALTY
-
-        return float(np.mean(scores))
-
-    def build_forecaster(
-        self,
-        params: dict,
-        feature_config: FeatureConfig | None = None,
-    ):
-        """Return a ``forecaster(train) -> pd.Series`` closure.
-
-        The returned callable fits a ``RandomForestRegressor`` on *train* and
-        produces recursive multi-step forecasts of length ``forecast_horizon``.
-
-        Args:
-            params: Optimal hyperparameters from ``optimize_model``.
-            feature_config: Override feature engineering settings.
-
-        Returns:
-            Callable ``forecaster(train: pd.Series) -> pd.Series``.
-        """
-        config = feature_config or self.feature_config
-        horizon = self.forecast_horizon
-
-        def forecaster(train: pd.Series) -> pd.Series:
-            fe = FeatureEngineer(config)
-            X_train, y_train = fe.fit_transform(train)
-            rf = RandomForestRegressor(
-                n_estimators=params["n_estimators"],
-                max_depth=params["max_depth"],
-                min_samples_split=params["min_samples_split"],
-                min_samples_leaf=params["min_samples_leaf"],
-                max_features=params["max_features"],
-                random_state=42,
-                n_jobs=1,
-            )
-            rf.fit(X_train, y_train)
-            return _recursive_forecast(rf, fe, train, horizon)
-
-        return forecaster
+    def _fit_final(self, X: pd.DataFrame, y: pd.Series, params: dict):
+        rf = RandomForestRegressor(
+            n_estimators=params["n_estimators"],
+            max_depth=params["max_depth"],
+            min_samples_split=params["min_samples_split"],
+            min_samples_leaf=params["min_samples_leaf"],
+            max_features=params["max_features"],
+            random_state=42,
+            n_jobs=1,
+        )
+        rf.fit(X, y)
+        return rf
