@@ -34,6 +34,10 @@ jobs:
       - name: Check formatting with black
         run: black --check .
 
+      - name: Type check with mypy
+        if: matrix.python-version == '3.11'
+        run: python -m mypy src/boa_forecaster
+
       - name: Run tests
         run: |
           pytest tests/ -v --tb=short \

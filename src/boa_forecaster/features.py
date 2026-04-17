@@ -188,6 +188,7 @@ class FeatureEngineer:
         if self.config.include_trend and isinstance(series.index, pd.DatetimeIndex):
             n_total = len(series)
             n_train = self._n_train  # set in fit_transform before _build_features
+            assert n_train is not None  # noqa: S101 — invariant documented above
 
             if fit:
                 # year_norm: normalised year relative to training year range

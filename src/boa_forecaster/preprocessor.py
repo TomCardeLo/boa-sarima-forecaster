@@ -190,7 +190,7 @@ def fill_blanks(
     unique_groups = df[group_cols].drop_duplicates()
     n_dates = len(full_range)
     n_groups = len(unique_groups)
-    date_values = np.repeat(full_range.to_numpy(), n_groups)
+    date_values: np.ndarray = np.repeat(full_range.to_numpy(), n_groups)
     group_arrays = [np.tile(unique_groups[c].to_numpy(), n_dates) for c in group_cols]
     full_idx = pd.MultiIndex.from_arrays(
         [date_values] + group_arrays,
