@@ -2,6 +2,26 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project Setup
+
+This project uses Python with uv as the dependency manager. Always use `uv` for installing dependencies and managing the environment.
+
+## Code Quality
+
+When implementing changes to process.py or prompt templates, always test with a real example to verify the code path is actually reached. Check that variables are properly passed through the full call chain.
+
+## Git Workflow
+
+After completing code changes, always commit and push automatically unless explicitly told not to. Do not wait for the user to ask.
+
+## Workflow
+
+When working from a plan file (e.g., tasks/plan.md or BACKLOG.md), update the plan document to mark completed items after each phase/task is done.
+
+## AI/LLM Prompt Work
+
+When modifying AI prompt templates or commentary generation, always test with at least 2 different inputs to verify variation and avoid repetitive outputs. Never assume a single test is sufficient.
+
 ## Commands
 
 ```bash
@@ -68,6 +88,7 @@ Pipeline stages:
 
 - `clip_outliers(series, method="sigma", threshold=2.5)` — the threshold parameter is named **`threshold`**, not `sigma_threshold`. `method` accepts `"sigma"` or `"iqr"`.
 - `weighted_moving_stats(row_index, sales_data, window_size=3, threshold=2.5)` — takes a plain list, not a Series; call it row-by-row inside a loop over one SKU.
+- `weighted_moving_stats_series(sales_data, window_size=3, threshold=2.5)` — vectorised O(n) bulk version; returns `(means, stds, clipped)` as three `np.ndarray`. Prefer this over looping `weighted_moving_stats`: ~18–130× faster (scales with series length). Mathematically equivalent.
 - The `m` (seasonal period) is **fixed** at 12 for monthly data and is not part of the Optuna search space. Set it via `SARIMASpec(seasonal_period=12)`.
 - `optimize_model(series, model_spec, n_trials=50)` — v2.0 generic entry point. `model_spec` is any `ModelSpec` instance (e.g. `SARIMASpec()`, `RandomForestSpec()`). Returns `OptimizationResult`.
 
