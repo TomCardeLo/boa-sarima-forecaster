@@ -56,6 +56,7 @@ from boa_forecaster.preprocessor import clean_zeros, fill_blanks
 from boa_forecaster.standardization import (
     clip_outliers,
     weighted_moving_stats,
+    weighted_moving_stats_batch,
     weighted_moving_stats_series,
 )
 
@@ -85,6 +86,7 @@ __all__ = [
     "clip_outliers",
     "weighted_moving_stats",
     "weighted_moving_stats_series",
+    "weighted_moving_stats_batch",
     # feature engineering
     "FeatureConfig",
     "FeatureEngineer",

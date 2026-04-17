@@ -5,7 +5,7 @@ This module implements a custom rolling-window smoother that:
 1. Computes a *weighted* average of temporal neighbours (closer neighbours
    receive higher weight).
 2. Computes a *weighted* standard deviation around that average.
-3. **Clips** the original value to ``[mean − threshold·σ, mean + threshold·σ]``,
+3. **Clips** the original value to ``[mean - threshold * sigma, mean + threshold * sigma]``,
    replacing extreme spikes with a more conservative estimate.
 
 The clipped values are stored as an alternative demand column
@@ -23,6 +23,8 @@ Public functions
     Vectorised bulk version of ``weighted_moving_stats``: computes all three
     output arrays for a full series in a single ``O(n)`` pass.  Prefer this
     over row-by-row loops for production pipelines.
+``weighted_moving_stats_batch``
+    Alias of ``weighted_moving_stats_series``; kept for API compatibility.
 """
 
 import warnings
@@ -31,7 +33,7 @@ import numpy as np
 import pandas as pd
 
 # Shared constants used by both the per-row and vectorised implementations.
-# Decaying weights: distance 1 → 0.3, distance 2 → 0.2, distance 3 → 0.1.
+# Decaying weights: distance 1 -> 0.3, distance 2 -> 0.2, distance 3 -> 0.1.
 # Values chosen empirically to balance sensitivity vs. noise tolerance.
 _REFERENCE_WEIGHTS: np.ndarray = np.array([0.3, 0.2, 0.1])
 # Threshold below which a sum of weights is treated as zero (avoids div-by-0
@@ -55,7 +57,7 @@ def clip_outliers(
             spikes from promotions or seasonal events.
 
     Returns:
-        Series with outliers clipped to ±threshold of the local mean.
+        Series with outliers clipped to +/-threshold of the local mean.
 
     Raises:
         ValueError: If ``method`` is not ``"sigma"`` or ``"iqr"``.
@@ -118,13 +120,13 @@ def weighted_moving_stats(
 
     For the observation at position ``row_index`` in ``sales_data``, the
     function looks at the ``window_size`` neighbours on each side, assigns
-    decaying weights ``[0.3, 0.2, 0.1]`` by distance (distance 1 → 0.3,
-    distance 2 → 0.2, distance 3 → 0.1), and computes:
+    decaying weights ``[0.3, 0.2, 0.1]`` by distance (distance 1 -> 0.3,
+    distance 2 -> 0.2, distance 3 -> 0.1), and computes:
 
     - A *weighted mean* of the neighbourhood (excluding the centre point).
     - A *weighted standard deviation* of that neighbourhood.
     - The centre value **clipped** to
-      ``[mean − threshold·σ, mean + threshold·σ]``.
+      ``[mean - threshold * sigma, mean + threshold * sigma]``.
 
     Neighbours at distance > 3 receive weight 0 (effectively ignored).
     The function is designed to be called row-by-row within a loop over
@@ -140,16 +142,16 @@ def weighted_moving_stats(
         threshold: Number of weighted standard deviations used as the
             clipping boundary.  Defaults to ``2.5`` (clips ~1.2 % of a
             normal distribution).  The previous default of ``1.0`` clipped
-            ~32 % of values — too aggressive for demand series containing
+            ~32 % of values - too aggressive for demand series containing
             promotions or seasonal peaks.
 
     Returns:
         Tuple ``(weighted_mean, weighted_std, clipped_value)`` where:
 
-        - ``weighted_mean``  – weighted average of neighbours (``float``).
-        - ``weighted_std``   – weighted standard deviation (``float``).
-        - ``clipped_value``  – original value clipped to
-          ``[mean − threshold·σ, mean + threshold·σ]`` (``float``).
+        - ``weighted_mean``  - weighted average of neighbours (``float``).
+        - ``weighted_std``   - weighted standard deviation (``float``).
+        - ``clipped_value``  - original value clipped to
+          ``[mean - threshold * sigma, mean + threshold * sigma]`` (``float``).
 
     Note:
         If there are no valid neighbours (e.g. a single-element series),
@@ -175,8 +177,8 @@ def weighted_moving_stats(
     neighbours = neighbourhood[neighbour_mask]
     neighbour_distances = distances[neighbour_mask]
 
-    # Assign weights: distance ≤ 3 → look up in _REFERENCE_WEIGHTS (0-indexed by dist-1);
-    # distance > 3 → weight = 0.
+    # Assign weights: distance <= 3 -> look up in _REFERENCE_WEIGHTS (0-indexed by dist-1);
+    # distance > 3 -> weight = 0.
     weights = np.where(
         neighbour_distances <= len(_REFERENCE_WEIGHTS),
         _REFERENCE_WEIGHTS[
@@ -194,11 +196,11 @@ def weighted_moving_stats(
     # Weighted mean of the neighbourhood
     weighted_mean = np.sum(neighbours * weights) / weight_sum
 
-    # Weighted population variance (clipped to ≥ 0 for numerical stability)
+    # Weighted population variance (clipped to >= 0 for numerical stability)
     weighted_variance = np.sum(weights * (neighbours - weighted_mean) ** 2) / weight_sum
     weighted_std = np.sqrt(max(0.0, weighted_variance))
 
-    # Clip the original observation to ±threshold·σ around the weighted mean
+    # Clip the original observation to +/-threshold * sigma around the weighted mean
     original_value = sales_data[row_index]
     lower_bound = weighted_mean - threshold * weighted_std
     upper_bound = weighted_mean + threshold * weighted_std
@@ -218,7 +220,7 @@ def weighted_moving_stats_series(
     clipped value for **every** position in ``sales_data`` in a single
     ``O(n)`` pass using a sliding-window view over the padded array.
     Mathematically equivalent to looping ``weighted_moving_stats`` over
-    each index, but 3–10× faster for long series because it avoids Python-
+    each index, but 3-10x faster for long series because it avoids Python-
     level iteration and re-allocation.
 
     The same weighting scheme applies: neighbours at distance ``1/2/3``
@@ -239,14 +241,14 @@ def weighted_moving_stats_series(
         Tuple ``(means, stds, clipped)`` of three ``np.ndarray`` of shape
         ``(len(sales_data),)`` with ``dtype=float``:
 
-        - ``means[i]``   – weighted mean of neighbours at position ``i``.
-        - ``stds[i]``    – weighted standard deviation at position ``i``.
-        - ``clipped[i]`` – original value clipped to
-          ``[mean − threshold·σ, mean + threshold·σ]`` and rounded.
+        - ``means[i]``   - weighted mean of neighbours at position ``i``.
+        - ``stds[i]``    - weighted standard deviation at position ``i``.
+        - ``clipped[i]`` - original value clipped to
+          ``[mean - threshold * sigma, mean + threshold * sigma]`` and rounded.
 
         For positions with no valid neighbours (e.g. the two ends of a
         length-1 series) the corresponding entries are ``(0.0, 0.0,
-        sales_data[i])`` — matching the per-row function exactly.
+        sales_data[i])`` - matching the per-row function exactly.
 
     Example:
         >>> data = [100, 110, 800, 105, 95, 102, 98, 107]
@@ -255,7 +257,7 @@ def weighted_moving_stats_series(
         True
 
     See Also:
-        :func:`weighted_moving_stats` — legacy per-row implementation.
+        :func:`weighted_moving_stats` - legacy per-row implementation.
     """
     arr = np.asarray(sales_data, dtype=float)
     n = arr.size
@@ -313,3 +315,9 @@ def weighted_moving_stats_series(
     clipped = np.where(no_neighbours, arr, clipped_normal)
 
     return means, stds, clipped
+
+
+# API-compatibility alias: the PR that introduced ``weighted_moving_stats_batch``
+# landed in parallel with ``weighted_moving_stats_series``. Both names resolve to
+# the same vectorised implementation.
+weighted_moving_stats_batch = weighted_moving_stats_series

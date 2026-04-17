@@ -9,6 +9,7 @@ import pytest
 from boa_forecaster.standardization import (
     clip_outliers,
     weighted_moving_stats,
+    weighted_moving_stats_batch,
     weighted_moving_stats_series,
 )
 
@@ -55,6 +56,81 @@ def test_returns_three_tuple(raw_series_with_outliers):
     data = raw_series_with_outliers
     result = weighted_moving_stats(0, data)
     assert len(result) == 3
+
+
+# ---------------------------------------------------------------------------
+# weighted_moving_stats_batch — vectorized equivalence tests
+# ---------------------------------------------------------------------------
+
+_DATASETS = [
+    [100, 110, 800, 105, 95, 0, 102, 98, 107, 0, 103, 99],  # outliers + zeros
+    [42],  # single element
+    [5, 5, 5, 5, 5],  # constant series
+    [0, 0, 0],  # all-zero series
+    list(range(1, 51)),  # 50-point ramp
+]
+
+
+def _loop_ref(data, **kwargs):
+    """Reference: row-by-row results as three lists."""
+    ref = [weighted_moving_stats(i, data, **kwargs) for i in range(len(data))]
+    means = [r[0] for r in ref]
+    stds = [r[1] for r in ref]
+    clips = [r[2] for r in ref]
+    return means, stds, clips
+
+
+def test_batch_matches_loop_default():
+    """Batch results must be numerically equivalent to the row-by-row loop.
+
+    Means and stds use assert_allclose (rtol=1e-10) because different FP
+    operation ordering causes ~1e-14 differences between the scalar loop and
+    the vectorised path — mathematically identical, not bit-identical.
+    Clipped values are rounded integers so they must match exactly.
+    """
+    for data in _DATASETS:
+        means_ref, stds_ref, clips_ref = _loop_ref(data)
+        means_b, stds_b, clips_b = weighted_moving_stats_batch(data)
+        np.testing.assert_allclose(means_b, means_ref, rtol=1e-10, atol=1e-10)
+        np.testing.assert_allclose(stds_b, stds_ref, rtol=1e-10, atol=1e-10)
+        np.testing.assert_array_equal(clips_b, clips_ref)
+
+
+def test_batch_window_size_variations():
+    data = [10, 20, 30, 40, 50, 60, 70]
+    for ws in (1, 2, 3):
+        means_ref, stds_ref, clips_ref = _loop_ref(data, window_size=ws)
+        means_b, stds_b, clips_b = weighted_moving_stats_batch(data, window_size=ws)
+        np.testing.assert_allclose(means_b, means_ref, rtol=1e-10, atol=1e-10)
+        np.testing.assert_allclose(stds_b, stds_ref, rtol=1e-10, atol=1e-10)
+        np.testing.assert_array_equal(clips_b, clips_ref)
+
+
+def test_batch_custom_threshold():
+    data = [100, 110, 800, 105, 95]
+    for thr in (1.0, 2.0, 3.5):
+        means_ref, stds_ref, clips_ref = _loop_ref(data, threshold=thr)
+        means_b, stds_b, clips_b = weighted_moving_stats_batch(data, threshold=thr)
+        np.testing.assert_allclose(means_b, means_ref, rtol=1e-10, atol=1e-10)
+        np.testing.assert_allclose(stds_b, stds_ref, rtol=1e-10, atol=1e-10)
+        np.testing.assert_array_equal(clips_b, clips_ref)
+
+
+def test_batch_return_types():
+    means, stds, clips = weighted_moving_stats_batch([1, 2, 3])
+    assert isinstance(means, np.ndarray)
+    assert isinstance(stds, np.ndarray)
+    assert isinstance(clips, np.ndarray)
+    assert means.shape == (3,)
+    assert stds.shape == (3,)
+    assert clips.shape == (3,)
+
+
+def test_batch_empty_input():
+    means, stds, clips = weighted_moving_stats_batch([])
+    assert means.shape == (0,)
+    assert stds.shape == (0,)
+    assert clips.shape == (0,)
 
 
 # ---------------------------------------------------------------------------
