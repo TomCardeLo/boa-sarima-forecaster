@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -123,9 +124,13 @@ def fill_blanks(
     """Fill missing calendar months with zero demand.
 
     The SARIMAX model requires a complete, gap-free time series (``asfreq``
-    raises on series with missing periods).  This function uses a MultiIndex
-    ``unstack / reindex / stack`` pattern to efficiently introduce zeros for
-    any ``(date, group)`` combination absent from the data.
+    raises on series with missing periods).  This function builds the target
+    ``(date × group)`` MultiIndex directly from ``np.repeat`` / ``np.tile``
+    and reindexes a grouped source Series, avoiding the intermediate
+    cross-join DataFrame a merge-based approach would allocate.
+
+    Duplicate ``(date, group)`` rows in the input are summed before reindexing
+    (a no-op when the pipeline runs ``clean_zeros`` first).
 
     Args:
         df: Input DataFrame with at least ``date_col``, ``group_cols``,
@@ -177,20 +182,32 @@ def fill_blanks(
         freq=freq,
     )
 
-    # Build full index: all dates × all group combinations that exist in data.
-    # Using a cross join (via a temporary key) is robust for any number of
-    # group columns and avoids the unstack/reindex MultiIndex issue.
-    full_dates = pd.DataFrame({date_col: full_range, "_key": 1})
-    unique_groups = df[group_cols].drop_duplicates().copy()
-    unique_groups["_key"] = 1
-    full_index = full_dates.merge(unique_groups, on="_key").drop(columns="_key")
-
-    # Left join to the original data; missing combinations get NaN → 0.
-    df_filled = full_index.merge(
-        df[[date_col] + group_cols + [value_col]],
-        on=[date_col] + group_cols,
-        how="left",
+    # Build the target (date × group) MultiIndex directly from numpy arrays.
+    # Cartesian product via np.repeat / np.tile avoids materialising the
+    # intermediate (n_dates × n_groups)-row DataFrame that a cross-join merge
+    # would allocate. Row order matches the legacy cross-join: iterate groups
+    # within each date, i.e. (d1,g1), (d1,g2), …, (d2,g1), ….
+    unique_groups = df[group_cols].drop_duplicates()
+    n_dates = len(full_range)
+    n_groups = len(unique_groups)
+    date_values: np.ndarray = np.repeat(full_range.to_numpy(), n_groups)
+    group_arrays = [np.tile(unique_groups[c].to_numpy(), n_dates) for c in group_cols]
+    full_idx = pd.MultiIndex.from_arrays(
+        [date_values] + group_arrays,
+        names=[date_col] + group_cols,
     )
-    df_filled[value_col] = df_filled[value_col].fillna(0)
+
+    # Fast path: set_index → reindex. If duplicate (date, group) rows are
+    # present, collapse them by summing — matches the intent of "total demand
+    # per period" and yields a unique index that reindex requires. Pipelines
+    # that run clean_zeros first never produce duplicates, so the groupby
+    # branch is skipped in practice.
+    source = df.set_index([date_col] + group_cols)[value_col]
+    if source.index.has_duplicates:
+        source = source.groupby(
+            level=list(range(len(group_cols) + 1)), sort=False
+        ).sum()
+
+    df_filled = source.reindex(full_idx, fill_value=0.0).reset_index()
 
     return df_filled
