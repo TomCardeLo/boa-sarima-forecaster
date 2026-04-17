@@ -23,6 +23,8 @@ the full fold training window so no test-set information leaks.
 
 from __future__ import annotations
 
+from typing import Any, Callable
+
 import pandas as pd
 
 try:
@@ -148,7 +150,7 @@ class LightGBMSpec(BaseMLSpec):
     def _fit_fold(self, X: pd.DataFrame, y: pd.Series, params: dict):
         X_tr, y_tr, X_val, y_val = split_for_early_stopping(X, y)
         model = lgb.LGBMRegressor(**params, random_state=42, verbose=-1)
-        callbacks = [
+        callbacks: list[Callable[..., Any]] = [
             lgb.early_stopping(self.early_stopping_rounds, verbose=False),
             lgb.log_evaluation(-1),
         ]

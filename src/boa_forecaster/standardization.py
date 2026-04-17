@@ -185,7 +185,7 @@ def weighted_moving_stats(
         0.0,
     )
 
-    weight_sum = np.sum(weights)
+    weight_sum: float = float(np.sum(weights))
 
     # Edge case: no usable neighbours (empty window or all-zero weights)
     if weight_sum < _WEIGHT_EPSILON:
@@ -260,7 +260,7 @@ def weighted_moving_stats_series(
     arr = np.asarray(sales_data, dtype=float)
     n = arr.size
     if n == 0:
-        empty = np.empty(0, dtype=float)
+        empty: np.ndarray = np.empty(0, dtype=float)
         return empty, empty, empty
 
     # Kernel: weight for every offset in [-window_size, +window_size].
