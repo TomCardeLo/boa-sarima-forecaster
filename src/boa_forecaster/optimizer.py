@@ -143,7 +143,15 @@ def optimize_model(
     try:
         study.optimize(objective, n_trials=n_calls, n_jobs=n_jobs)
     except Exception as exc:
-        logger.error("Optimisation study failed: %s", exc)
+        # Soft-failure: surface the crash via ``is_fallback=True`` + a WARNING
+        # log (with traceback) so callers can distinguish a genuine optimum
+        # from a default warm-start returned after a study crash.
+        logger.warning(
+            "Optimisation study for %s failed: %s — returning fallback result.",
+            model_spec.name,
+            exc,
+            exc_info=True,
+        )
         fallback = model_spec.warm_starts[0] if model_spec.warm_starts else {}
         if verbose:
             optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -152,6 +160,7 @@ def optimize_model(
             best_score=OPTIMIZER_PENALTY,
             n_trials=0,
             model_name=model_spec.name,
+            is_fallback=True,
         )
 
     if verbose:
@@ -169,6 +178,7 @@ def optimize_model(
         best_score=study.best_value,
         n_trials=len(study.trials),
         model_name=model_spec.name,
+        is_fallback=False,
     )
 
 
