@@ -7,12 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [2.0.0] — Unreleased
+## [2.1.0] — Unreleased
 
-First major release on the new multi-model framework line.  Renames the
-package from `sarima_bayes` → `boa_forecaster`, opens the optimisation
-engine to any `ModelSpec`, and ships the full Phase A–E improvement
-plan (perf, tests, code quality, CI, docs).
+Feature release on the v2.x line.  Ships the full Phase A–E improvement
+plan (perf, tests, code quality, CI, docs) on top of the v2.0.0 framework
+foundation.  No breaking API changes since v2.0.0 — additions and
+deprecations only.
 
 > **Migration note.**  `import sarima_bayes` continues to work via a
 > compatibility shim that re-exports the entire `boa_forecaster` API
@@ -172,7 +172,7 @@ plan (perf, tests, code quality, CI, docs).
   cast and empty-`ndarray` annotation in `standardization.py`, and a
   `date_values` `ndarray` annotation in `preprocessor.py`.
 
-[2.0.0]: https://github.com/TomCardeLo/boa-sarima-forecaster/compare/v1.4.0...v2.0.0
+[2.1.0]: https://github.com/TomCardeLo/boa-forecaster/compare/v2.0.0...v2.1.0
 
 ---
 
