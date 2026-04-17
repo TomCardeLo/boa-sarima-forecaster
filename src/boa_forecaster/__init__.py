@@ -53,7 +53,11 @@ from boa_forecaster.optimizer import optimize_arima, optimize_model
 
 # ── Preprocessing & standardisation (Phase 0) ────────────────────────────────
 from boa_forecaster.preprocessor import clean_zeros, fill_blanks
-from boa_forecaster.standardization import clip_outliers, weighted_moving_stats
+from boa_forecaster.standardization import (
+    clip_outliers,
+    weighted_moving_stats,
+    weighted_moving_stats_series,
+)
 
 # ── Validation (Phase 0) ──────────────────────────────────────────────────────
 from boa_forecaster.validation import validate_by_group, walk_forward_validation
@@ -80,6 +84,7 @@ __all__ = [
     # standardization
     "clip_outliers",
     "weighted_moving_stats",
+    "weighted_moving_stats_series",
     # feature engineering
     "FeatureConfig",
     "FeatureEngineer",

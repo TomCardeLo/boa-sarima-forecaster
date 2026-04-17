@@ -2,10 +2,15 @@
 
 import math
 
+import numpy as np
 import pandas as pd
 import pytest
 
-from boa_forecaster.standardization import clip_outliers, weighted_moving_stats
+from boa_forecaster.standardization import (
+    clip_outliers,
+    weighted_moving_stats,
+    weighted_moving_stats_series,
+)
 
 # ---------------------------------------------------------------------------
 # weighted_moving_stats (existing tests, preserved)
@@ -118,3 +123,103 @@ class TestClipOutliers:
         s = pd.Series([5.0] * 10)
         with pytest.warns(UserWarning, match="zero IQR"):
             clip_outliers(s, method="iqr")
+
+
+# ---------------------------------------------------------------------------
+# weighted_moving_stats_series — vectorized bulk version
+# ---------------------------------------------------------------------------
+
+
+def _per_row_reference(data, window_size=3, threshold=2.5):
+    """Reference implementation: loop the per-row function."""
+    means, stds, clipped = [], [], []
+    for i in range(len(data)):
+        m, s, c = weighted_moving_stats(
+            i, data, window_size=window_size, threshold=threshold
+        )
+        means.append(m)
+        stds.append(s)
+        clipped.append(c)
+    return np.array(means), np.array(stds), np.array(clipped, dtype=float)
+
+
+class TestWeightedMovingStatsSeries:
+    def test_equivalence_with_outliers(self, raw_series_with_outliers):
+        data = raw_series_with_outliers
+        ref_m, ref_s, ref_c = _per_row_reference(data)
+        m, s, c = weighted_moving_stats_series(data)
+        np.testing.assert_allclose(m, ref_m, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(s, ref_s, rtol=1e-12, atol=1e-12)
+        np.testing.assert_array_equal(c, ref_c)
+
+    def test_equivalence_custom_threshold(self, raw_series_with_outliers):
+        ref_m, ref_s, ref_c = _per_row_reference(
+            raw_series_with_outliers, threshold=1.0
+        )
+        m, s, c = weighted_moving_stats_series(raw_series_with_outliers, threshold=1.0)
+        np.testing.assert_allclose(m, ref_m, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(s, ref_s, rtol=1e-12, atol=1e-12)
+        np.testing.assert_array_equal(c, ref_c)
+
+    def test_equivalence_large_window_size(self, raw_series_with_outliers):
+        # window_size > len(_REFERENCE_WEIGHTS): far neighbours get weight 0
+        ref_m, ref_s, ref_c = _per_row_reference(
+            raw_series_with_outliers, window_size=5
+        )
+        m, s, c = weighted_moving_stats_series(raw_series_with_outliers, window_size=5)
+        np.testing.assert_allclose(m, ref_m, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(s, ref_s, rtol=1e-12, atol=1e-12)
+        np.testing.assert_array_equal(c, ref_c)
+
+    def test_equivalence_long_random_series(self):
+        rng = np.random.default_rng(123)
+        data = rng.integers(0, 1000, size=200).tolist()
+        ref_m, ref_s, ref_c = _per_row_reference(data)
+        m, s, c = weighted_moving_stats_series(data)
+        np.testing.assert_allclose(m, ref_m, rtol=1e-10, atol=1e-10)
+        np.testing.assert_allclose(s, ref_s, rtol=1e-10, atol=1e-10)
+        np.testing.assert_array_equal(c, ref_c)
+
+    def test_empty_input(self):
+        m, s, c = weighted_moving_stats_series([])
+        assert m.shape == (0,)
+        assert s.shape == (0,)
+        assert c.shape == (0,)
+
+    def test_single_element(self):
+        # No neighbours → (0, 0, original_value) not rounded
+        m, s, c = weighted_moving_stats_series([42])
+        assert m.tolist() == [0.0]
+        assert s.tolist() == [0.0]
+        assert c.tolist() == [42.0]
+
+    def test_two_elements(self):
+        ref_m, ref_s, ref_c = _per_row_reference([10, 20])
+        m, s, c = weighted_moving_stats_series([10, 20])
+        np.testing.assert_allclose(m, ref_m, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(s, ref_s, rtol=1e-12, atol=1e-12)
+        np.testing.assert_array_equal(c, ref_c)
+
+    def test_constant_series_clipped_to_constant(self):
+        m, s, c = weighted_moving_stats_series([5, 5, 5, 5, 5])
+        np.testing.assert_array_equal(c, np.array([5.0, 5.0, 5.0, 5.0, 5.0]))
+        np.testing.assert_allclose(s, np.zeros(5), atol=1e-12)
+
+    def test_accepts_numpy_array(self, raw_series_with_outliers):
+        ref = _per_row_reference(raw_series_with_outliers)
+        got = weighted_moving_stats_series(np.asarray(raw_series_with_outliers))
+        for r, g in zip(ref, got):
+            np.testing.assert_allclose(g, r, rtol=1e-12, atol=1e-12)
+
+    def test_accepts_pandas_series(self, raw_series_with_outliers):
+        ref = _per_row_reference(raw_series_with_outliers)
+        got = weighted_moving_stats_series(pd.Series(raw_series_with_outliers))
+        for r, g in zip(ref, got):
+            np.testing.assert_allclose(g, r, rtol=1e-12, atol=1e-12)
+
+    def test_output_shapes_match_input(self):
+        data = list(range(50))
+        m, s, c = weighted_moving_stats_series(data)
+        assert m.shape == (50,)
+        assert s.shape == (50,)
+        assert c.shape == (50,)
