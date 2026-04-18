@@ -4,7 +4,7 @@ boa_forecaster: Bayesian TPE optimisation framework for time series forecasting.
 Phase 1 public API — core infrastructure complete.
 """
 
-__version__ = "2.0.0-dev"
+__version__ = "2.1.0"
 
 # ── Metrics (Phase 0) ─────────────────────────────────────────────────────────
 # ── Feature engineering (Phase 1) ────────────────────────────────────────────
