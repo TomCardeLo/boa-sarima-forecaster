@@ -103,6 +103,24 @@ class TestValidateSeries:
         with pytest.raises(ValueError, match="Inf"):
             optimize_model(s, SARIMASpec(), n_calls=1)
 
+    def test_rejects_inf_at_position_zero(self):
+        # Regression test for the np.isinf(to_numpy()).any() refactor —
+        # ensures the vectorised check catches an Inf at the very first
+        # element (the old isin([inf, -inf]).any() path already did; this
+        # guards against future short-circuit mistakes).
+        dates = pd.date_range("2020-01", periods=30, freq="MS")
+        s = pd.Series(np.ones(30), index=dates)
+        s.iloc[0] = np.inf
+        with pytest.raises(ValueError, match="Inf"):
+            optimize_model(s, SARIMASpec(), n_calls=1)
+
+    def test_rejects_negative_inf(self):
+        dates = pd.date_range("2020-01", periods=30, freq="MS")
+        s = pd.Series(np.ones(30), index=dates)
+        s.iloc[3] = -np.inf
+        with pytest.raises(ValueError, match="Inf"):
+            optimize_model(s, SARIMASpec(), n_calls=1)
+
     def test_accepts_valid_series(self, synthetic_series):
         result = optimize_model(synthetic_series, SARIMASpec(), n_calls=2)
         assert result is not None

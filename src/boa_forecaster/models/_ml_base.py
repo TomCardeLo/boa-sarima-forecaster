@@ -115,6 +115,7 @@ class BaseMLSpec:
         params: dict,
         metric_fn,
         feature_config: FeatureConfig | None = None,
+        feature_cache: pd.DataFrame | None = None,
     ) -> float:
         """Evaluate *params* via expanding-window CV.
 
@@ -127,6 +128,11 @@ class BaseMLSpec:
             params: Hyperparameter dict sampled from ``search_space``.
             metric_fn: ``metric_fn(y_true, y_pred) -> float`` objective.
             feature_config: Override for this evaluation only.
+            feature_cache: Optional deterministic-feature cache produced by
+                ``features._compute_deterministic_features`` over a superset
+                of ``series.index``.  The optimiser builds this once per
+                study and threads it through every trial so each fold
+                avoids recomputing calendar / trend columns (v2.2 P1).
 
         Returns:
             Mean metric across valid folds, or ``OPTIMIZER_PENALTY`` on failure.
@@ -148,7 +154,11 @@ class BaseMLSpec:
 
             try:
                 fe = FeatureEngineer(config)
-                X_train, y_train = fe.fit_transform(train)
+                # The cache (if any) spans the full optimiser series index, so
+                # slicing inside _build_features handles both the fit call and
+                # the growing extended-series slices used by recursive_forecast
+                # via the cache attribute stored on ``fe``.
+                X_train, y_train = fe.fit_transform(train, feature_cache=feature_cache)
                 model = self._fit_fold(X_train, y_train, params)
                 y_pred = recursive_forecast(model, fe, train, len(test))
                 scores.append(metric_fn(test.values, y_pred.values))
