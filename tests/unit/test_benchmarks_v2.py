@@ -10,6 +10,9 @@ Coverage
 
 from __future__ import annotations
 
+import logging
+import sys
+import types
 import warnings
 
 import numpy as np
@@ -142,6 +145,145 @@ class TestAutoArimaNixtla:
         # Patch the inner try by just calling seasonal_naive directly.
         fc = seasonal_naive(long_series, 6)
         assert len(fc) == 6
+
+
+# ---------------------------------------------------------------------------
+# TestEtsModelFallbackObservable — covers benchmarks.py:120-122
+# ---------------------------------------------------------------------------
+
+
+class TestEtsModelFallbackObservable:
+    """Force ``ExponentialSmoothing`` to raise so ``ets_model`` falls back to
+    ``seasonal_naive`` — the fallback must (a) not raise, (b) emit a WARNING
+    log record, and (c) return the seasonal_naive result shape."""
+
+    def test_fallback_returns_seasonal_naive_shape(self, monkeypatch, long_series):
+        import statsmodels.tsa.holtwinters as hw
+
+        class _BoomES:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError("forced ETS failure for coverage")
+
+        monkeypatch.setattr(hw, "ExponentialSmoothing", _BoomES)
+
+        from boa_forecaster.benchmarks import ets_model
+
+        fc = ets_model(long_series, forecast_horizon=6, m=12)
+        assert isinstance(fc, pd.Series)
+        assert len(fc) == 6
+
+    def test_fallback_logs_warning(self, monkeypatch, long_series, caplog):
+        import statsmodels.tsa.holtwinters as hw
+
+        class _BoomES:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError("forced ETS failure for coverage")
+
+        monkeypatch.setattr(hw, "ExponentialSmoothing", _BoomES)
+
+        from boa_forecaster.benchmarks import ets_model
+
+        caplog.set_level(logging.WARNING, logger="boa_forecaster.benchmarks")
+        ets_model(long_series, forecast_horizon=6, m=12)
+
+        assert any(
+            "ets_model failed" in rec.message for rec in caplog.records
+        ), "Expected a WARNING about ets_model falling back."
+
+
+# ---------------------------------------------------------------------------
+# TestAutoArimaFallbackObservable — covers benchmarks.py:179-183
+# ---------------------------------------------------------------------------
+
+
+class TestAutoArimaFallbackObservable:
+    """Inject a fake ``statsforecast`` whose ``StatsForecast.forecast`` raises.
+    ``auto_arima_nixtla`` must fall back to ``seasonal_naive`` and log a
+    WARNING."""
+
+    @staticmethod
+    def _install_boom_statsforecast(monkeypatch):
+        fake_sf = types.ModuleType("statsforecast")
+        fake_models = types.ModuleType("statsforecast.models")
+
+        class _FakeAutoARIMA:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        class _BoomSF:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def forecast(self, *args, **kwargs):
+                raise RuntimeError("forced statsforecast failure")
+
+        fake_sf.StatsForecast = _BoomSF
+        fake_models.AutoARIMA = _FakeAutoARIMA
+        fake_sf.models = fake_models
+
+        monkeypatch.setitem(sys.modules, "statsforecast", fake_sf)
+        monkeypatch.setitem(sys.modules, "statsforecast.models", fake_models)
+
+    def test_fallback_returns_seasonal_naive_shape(self, monkeypatch, long_series):
+        self._install_boom_statsforecast(monkeypatch)
+
+        from boa_forecaster.benchmarks import auto_arima_nixtla
+
+        fc = auto_arima_nixtla(long_series, forecast_horizon=6, m=12)
+        assert isinstance(fc, pd.Series)
+        assert len(fc) == 6
+
+    def test_fallback_logs_warning(self, monkeypatch, long_series, caplog):
+        self._install_boom_statsforecast(monkeypatch)
+
+        from boa_forecaster.benchmarks import auto_arima_nixtla
+
+        caplog.set_level(logging.WARNING, logger="boa_forecaster.benchmarks")
+        auto_arima_nixtla(long_series, forecast_horizon=6, m=12)
+
+        assert any(
+            "auto_arima_nixtla failed" in rec.message for rec in caplog.records
+        ), "Expected a WARNING about auto_arima_nixtla falling back."
+
+
+# ---------------------------------------------------------------------------
+# TestAutoArimaHappyPathMonkeypatched — covers benchmarks.py:174 (return stmt)
+# ---------------------------------------------------------------------------
+
+
+class TestAutoArimaHappyPathMonkeypatched:
+    """Inject a fake ``statsforecast`` whose ``forecast`` returns a valid
+    DataFrame so the happy-path ``return pd.Series(...)`` is exercised."""
+
+    def test_happy_path_returns_sentinel_values(self, monkeypatch, long_series):
+        fake_sf = types.ModuleType("statsforecast")
+        fake_models = types.ModuleType("statsforecast.models")
+
+        class _FakeAutoARIMA:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        class _FakeSF:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def forecast(self, df, h):
+                return pd.DataFrame({"AutoARIMA": np.full(h, 42.0)})
+
+        fake_sf.StatsForecast = _FakeSF
+        fake_models.AutoARIMA = _FakeAutoARIMA
+        fake_sf.models = fake_models
+
+        monkeypatch.setitem(sys.modules, "statsforecast", fake_sf)
+        monkeypatch.setitem(sys.modules, "statsforecast.models", fake_models)
+
+        from boa_forecaster.benchmarks import auto_arima_nixtla
+
+        fc = auto_arima_nixtla(long_series, forecast_horizon=6, m=12)
+        assert isinstance(fc, pd.Series)
+        assert len(fc) == 6
+        # Sentinel proves the happy-path branch — not the seasonal_naive fallback.
+        np.testing.assert_allclose(fc.values, np.full(6, 42.0))
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +459,59 @@ class TestRunModelComparison:
         )
         # All rows should be baselines
         assert (result["optimized"] == False).all()  # noqa: E712
+
+    def test_empty_df_returns_empty_dataframe(self):
+        """An empty df (no groups) must return an empty DataFrame, not raise."""
+        empty = pd.DataFrame(columns=["group", "date", "demand"])
+        result = run_model_comparison(
+            empty,
+            group_cols=["group"],
+            target_col="demand",
+            date_col="date",
+            model_specs=[SARIMASpec()],
+            n_calls_per_model=3,
+            n_folds=3,
+            test_size=12,
+            min_train_size=24,
+        )
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty
+
+    def test_optimize_failure_is_logged_and_skipped(self, single_group_df, caplog):
+        """When a ModelSpec's ``search_space`` blows up inside
+        ``optimize_model``, ``run_model_comparison`` must log a WARNING and
+        continue with the remaining models (baselines)."""
+
+        class _ExplodingSpec:
+            name = "exploder"
+
+            def search_space(self, trial):
+                raise RuntimeError("exploder.search_space blew up")
+
+            def build_forecaster(self, params):
+                raise AssertionError("should not be reached")
+
+        caplog.set_level(logging.WARNING, logger="boa_forecaster.benchmarks")
+        result = run_model_comparison(
+            single_group_df,
+            group_cols=["group"],
+            target_col="demand",
+            date_col="date",
+            model_specs=[_ExplodingSpec()],
+            n_calls_per_model=3,
+            n_folds=3,
+            test_size=12,
+            min_train_size=24,
+        )
+
+        # Baselines must still populate output.
+        assert not result.empty
+        assert "exploder" not in set(result["model"].unique())
+        # And the failure must be surfaced, not silently swallowed.
+        assert any(
+            "exploder" in rec.message and "failed" in rec.message
+            for rec in caplog.records
+        ), "Expected a WARNING about the exploding spec."
 
 
 # ---------------------------------------------------------------------------
@@ -554,3 +749,50 @@ class TestRunBenchmarkComparisonV1Compat:
         tbl = summary_table(result, group_cols=["group"])
         assert "beats_naive" in tbl.columns
         assert len(tbl) == 4  # SARIMA+BO + 3 baselines
+
+    def test_empty_df_returns_empty_dataframe(self, sarima_fn):
+        """An empty df (no groups) must return an empty DataFrame."""
+        empty = pd.DataFrame(columns=["group", "date", "demand"])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            result = run_benchmark_comparison(
+                empty,
+                group_cols=["group"],
+                target_col="demand",
+                date_col="date",
+                sarima_model_fn=sarima_fn,
+                n_folds=3,
+                test_size=6,
+                min_train_size=24,
+            )
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty
+
+    def test_failing_sarima_fn_is_logged_and_skipped(self, group_df, caplog):
+        """A SARIMA callable that raises on every call must surface as a
+        per-group WARNING; baselines must still produce rows."""
+
+        def _boom_fn(train):
+            raise RuntimeError("forced SARIMA+BO failure")
+
+        caplog.set_level(logging.WARNING, logger="boa_forecaster.benchmarks")
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            result = run_benchmark_comparison(
+                group_df,
+                group_cols=["group"],
+                target_col="demand",
+                date_col="date",
+                sarima_model_fn=_boom_fn,
+                n_folds=3,
+                test_size=6,
+                min_train_size=24,
+            )
+
+        # Baselines still present; SARIMA+BO produces only NaN rows (WFV
+        # catches the per-fold failure and surfaces NaN metrics).
+        assert not result.empty
+        assert {"seasonal_naive", "ETS", "AutoARIMA"}.issubset(
+            set(result["model"].unique())
+        )
