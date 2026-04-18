@@ -23,8 +23,7 @@ import pandas as pd
 # Allow running from the repo root without installing the package
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from sarima_bayes.model import pred_arima
-from sarima_bayes.optimizer import optimize_arima
+from boa_forecaster import optimize_arima, pred_arima
 
 # ---------------------------------------------------------------------------
 # Reproducible synthetic series
