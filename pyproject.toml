@@ -34,6 +34,7 @@ notebooks = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "pytest-benchmark>=4.0",
     "black>=23.0",
     "ruff>=0.1",
     "hypothesis>=6.0",
@@ -95,6 +96,7 @@ markers = [
     "requires_xgboost: tests that need xgboost installed",
     "requires_lightgbm: tests that need lightgbm installed",
     "integration: multi-model end-to-end tests",
+    "perf: performance regression benchmarks (pytest-benchmark); skipped unless explicitly run",
 ]
 
 [tool.mypy]
