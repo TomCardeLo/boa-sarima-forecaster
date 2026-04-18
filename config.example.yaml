@@ -1,3 +1,5 @@
+# $schema-compatible
+# Validated at load time by boa_forecaster.config_schema.BoaConfig.
 # ──────────────────────────────────────────────────────────────────────────────
 # boa-sarima-forecaster  –  Example configuration file
 #
