@@ -43,6 +43,10 @@ jobs:
         if: matrix.python-version == '3.11'
         run: python -m mypy src/boa_forecaster
 
+      - name: Security scan (bandit)
+        if: matrix.python-version == '3.11'
+        run: python -m bandit -r src/ -ll
+
       - name: Run tests
         run: |
           pytest tests/ -v --tb=short \

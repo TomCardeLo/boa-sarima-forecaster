@@ -58,6 +58,26 @@ def get_model_spec(name: str, **kwargs) -> ModelSpec:
     return MODEL_REGISTRY[name](**kwargs)
 
 
+class _MissingExtra:
+    """Sentinel standing in for an optional ``ModelSpec`` when its extra is not installed.
+
+    Instances are callable; invoking them raises ``ImportError`` with a message
+    pointing at the correct ``pip install`` extra. This replaces the earlier
+    ``XGBoostSpec = None`` fallback so that ``XGBoostSpec()`` produces a clear,
+    actionable error instead of a cryptic ``TypeError: 'NoneType' not callable``.
+    """
+
+    def __init__(self, pkg: str, extras: str) -> None:
+        self._pkg = pkg
+        self._extras = extras
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        raise ImportError(
+            f"{self._pkg} is not installed. "
+            f"Install with: pip install 'sarima-bayes[{self._extras}]'"
+        )
+
+
 # Auto-register built-in models
 register_model("sarima", SARIMASpec)
 register_model("random_forest", RandomForestSpec)
@@ -68,7 +88,7 @@ try:
 
     register_model("xgboost", XGBoostSpec)
 except ImportError:
-    XGBoostSpec = None  # type: ignore[assignment,misc]
+    XGBoostSpec = _MissingExtra("xgboost", "xgboost")  # type: ignore[assignment,misc]
 
 # Optional: LightGBM (requires lightgbm package)
 try:
@@ -76,7 +96,7 @@ try:
 
     register_model("lightgbm", LightGBMSpec)
 except ImportError:
-    LightGBMSpec = None  # type: ignore[assignment,misc]
+    LightGBMSpec = _MissingExtra("lightgbm", "lightgbm")  # type: ignore[assignment,misc]
 
 __all__ = [
     "ModelSpec",
