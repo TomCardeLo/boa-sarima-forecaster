@@ -82,6 +82,10 @@ known-first-party = ["src"]
 
 [tool.ruff.lint.per-file-ignores]
 "notebooks/*.ipynb" = ["E402"]
+# Pydantic v2 evaluates model-field annotations at runtime. On Python 3.9
+# PEP 604 `X | None` raises TypeError, so this file must use typing.Optional /
+# typing.Union despite the project-wide UP preference.
+"src/boa_forecaster/config_schema.py" = ["UP007", "UP045"]
 
 [tool.pytest.ini_options]
 markers = [

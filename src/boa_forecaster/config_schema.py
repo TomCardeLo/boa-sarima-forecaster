@@ -24,7 +24,7 @@ configs keep loading during the v2.x series.  In v3.0 this flips to
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Union
 
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field
@@ -46,7 +46,7 @@ class DataConfig(BaseModel):
     sheet_name: str = "Data"
     skip_rows: int = 2
     date_format: str = "%Y%m"
-    end_date: str | None = None
+    end_date: Optional[str] = None
     freq: str = "MS"
 
 
@@ -154,11 +154,11 @@ class ModelsConfig(BaseModel):
     model_config = _ALLOW_EXTRA
 
     active: str = "sarima"
-    sarima: ModelEntry | None = None
-    random_forest: ModelEntry | None = None
-    xgboost: ModelEntry | None = None
-    lightgbm: ModelEntry | None = None
-    ensemble: ModelEntry | None = None
+    sarima: Optional[ModelEntry] = None
+    random_forest: Optional[ModelEntry] = None
+    xgboost: Optional[ModelEntry] = None
+    lightgbm: Optional[ModelEntry] = None
+    ensemble: Optional[ModelEntry] = None
 
 
 class FeaturesConfig(BaseModel):
@@ -186,7 +186,7 @@ class BoaConfig(BaseModel):
 
     model_config = _ALLOW_EXTRA
 
-    data: DataConfig | None = None
+    data: Optional[DataConfig] = None
     standardization: StandardizationConfig = Field(
         default_factory=StandardizationConfig
     )
@@ -199,12 +199,12 @@ class BoaConfig(BaseModel):
     features: FeaturesConfig = Field(default_factory=FeaturesConfig)
     # Legacy v1 block preserved for backwards compatibility; superseded by
     # ``models.<name>`` in v2.
-    model: dict[str, Any] | None = None
+    model: Optional[dict[str, Any]] = None
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
     @classmethod
-    def load(cls, path: str | Path) -> BoaConfig:
+    def load(cls, path: Union[str, Path]) -> BoaConfig:
         """Read *path* as YAML and validate it against this schema.
 
         Args:
