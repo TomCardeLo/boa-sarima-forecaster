@@ -78,6 +78,14 @@ try:
 except ImportError:
     LightGBMSpec = None  # type: ignore[assignment,misc]
 
+# Ensemble (Track D / X3) — registered last, after optional-ML imports are resolved.
+from boa_forecaster.models.ensemble import (  # noqa: E402
+    EnsembleSpec,
+    build_ensemble,
+)
+
+register_model("ensemble", EnsembleSpec)
+
 __all__ = [
     "ModelSpec",
     "OptimizationResult",
@@ -90,6 +98,8 @@ __all__ = [
     "RandomForestSpec",
     "XGBoostSpec",
     "LightGBMSpec",
+    "EnsembleSpec",
+    "build_ensemble",
     "MODEL_REGISTRY",
     "register_model",
     "get_model_spec",
