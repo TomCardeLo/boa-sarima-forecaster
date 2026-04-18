@@ -32,8 +32,10 @@ from boa_forecaster.metrics import (
 # ── Model registry & types (Phase 1) ─────────────────────────────────────────
 from boa_forecaster.models import (
     MODEL_REGISTRY,
+    EnsembleSpec,
     LightGBMSpec,  # None if lightgbm not installed
     XGBoostSpec,  # None if xgboost not installed
+    build_ensemble,
     get_model_spec,
     register_model,
 )
@@ -101,6 +103,8 @@ __all__ = [
     "RandomForestSpec",
     "XGBoostSpec",
     "LightGBMSpec",
+    "EnsembleSpec",
+    "build_ensemble",
     "MODEL_REGISTRY",
     "register_model",
     "get_model_spec",
