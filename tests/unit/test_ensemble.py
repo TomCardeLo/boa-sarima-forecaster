@@ -248,7 +248,16 @@ def test_build_ensemble_parallel_matches_sequential() -> None:
 # ── E3: needs_features reflects members ──────────────────────────────────────
 
 
-def test_needs_features_reflects_members() -> None:
+def test_needs_features_false_when_no_ml_members() -> None:
+    """Pure-SARIMA ensemble does not need feature engineering."""
+    from boa_forecaster.models.sarima import SARIMASpec
+
+    only_sarima = EnsembleSpec([SARIMASpec()], weighting="equal")
+    assert only_sarima.needs_features is False
+
+
+@pytest.mark.requires_sklearn
+def test_needs_features_true_when_ml_member_present() -> None:
     """``EnsembleSpec.needs_features`` must be the OR across its members.
 
     Regression for Track E (v2.3) bug: the hardcoded class attribute
@@ -257,11 +266,9 @@ def test_needs_features_reflects_members() -> None:
     attribute would skip it and hand the raw series to an ML model that
     needs a ``FeatureEngineer``.
     """
+    pytest.importorskip("sklearn")
     from boa_forecaster.models.random_forest import RandomForestSpec
     from boa_forecaster.models.sarima import SARIMASpec
-
-    only_sarima = EnsembleSpec([SARIMASpec()], weighting="equal")
-    assert only_sarima.needs_features is False
 
     mixed = EnsembleSpec([SARIMASpec(), RandomForestSpec()], weighting="equal")
     assert mixed.needs_features is True
