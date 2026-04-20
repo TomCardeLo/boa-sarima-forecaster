@@ -54,7 +54,7 @@ from boa_forecaster.models.sarima import SARIMASpec, forecast_arima, pred_arima
 from boa_forecaster.optimizer import optimize_arima, optimize_model
 
 # ── Preprocessing & standardisation (Phase 0) ────────────────────────────────
-from boa_forecaster.preprocessor import clean_zeros, fill_blanks
+from boa_forecaster.preprocessor import clean_zeros, fill_blanks, flag_intermittent
 from boa_forecaster.standardization import (
     clip_outliers,
     weighted_moving_stats,
@@ -84,6 +84,7 @@ __all__ = [
     # preprocessor
     "fill_blanks",
     "clean_zeros",
+    "flag_intermittent",
     # standardization
     "clip_outliers",
     "weighted_moving_stats",

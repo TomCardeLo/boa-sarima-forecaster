@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
-from boa_forecaster.preprocessor import _freq_to_period_alias, clean_zeros, fill_blanks
+from boa_forecaster.preprocessor import (
+    _freq_to_period_alias,
+    clean_zeros,
+    fill_blanks,
+    flag_intermittent,
+)
 
 
 class TestFreqToPeriodAlias:
@@ -263,6 +269,94 @@ class TestFillBlanksDuplicateAggregation:
         result = fill_blanks(df)
         assert len(result) == 3
         assert result.sort_values("Date")["CS"].tolist() == [30.0, 0.0, 5.0]
+
+
+class TestFlagIntermittent:
+    """flag_intermittent marks groups whose zero-ratio meets the threshold.
+
+    Returned mask must be aligned with the input DataFrame's index and must
+    not mutate the input.
+    """
+
+    @staticmethod
+    def _build_three_group_df() -> pd.DataFrame:
+        """Synthetic df with 3 groups: continuous, intermittent, flat-zero."""
+        rows: list[dict] = []
+        # Group 1 — continuous: 10 non-zero observations.
+        for i in range(10):
+            rows.append({"SKU": 1, "CS": float(i + 1)})
+        # Group 2 — intermittent: 10 obs, 8 zeros (80% zero ratio >= 0.7).
+        intermittent = [0.0] * 8 + [5.0, 3.0]
+        for v in intermittent:
+            rows.append({"SKU": 2, "CS": v})
+        # Group 3 — flat zero: 10 zeros (100% zero ratio).
+        for _ in range(10):
+            rows.append({"SKU": 3, "CS": 0.0})
+        return pd.DataFrame(rows)
+
+    def test_flags_intermittent_and_flat_zero_groups(self):
+        df = self._build_three_group_df()
+        mask = flag_intermittent(df, group_cols=["SKU"])
+        # Continuous group (SKU=1): zero_ratio = 0 → False.
+        assert not mask[df["SKU"] == 1].any()
+        # Intermittent group (SKU=2): zero_ratio = 0.8 → True.
+        assert mask[df["SKU"] == 2].all()
+        # Flat-zero group (SKU=3): zero_ratio = 1.0 → True.
+        assert mask[df["SKU"] == 3].all()
+
+    def test_returns_boolean_series_aligned_with_input(self):
+        df = self._build_three_group_df()
+        mask = flag_intermittent(df, group_cols=["SKU"])
+        assert isinstance(mask, pd.Series)
+        assert mask.dtype == bool
+        assert len(mask) == len(df)
+        # Index alignment
+        pd.testing.assert_index_equal(mask.index, df.index)
+
+    def test_custom_threshold(self):
+        df = self._build_three_group_df()
+        # Threshold 0.9 → only SKU 3 (100% zeros) should qualify.
+        mask = flag_intermittent(df, group_cols=["SKU"], threshold=0.9)
+        assert not mask[df["SKU"] == 1].any()
+        assert not mask[df["SKU"] == 2].any()
+        assert mask[df["SKU"] == 3].all()
+
+    def test_does_not_mutate_input(self):
+        df = self._build_three_group_df()
+        df_before = df.copy()
+        _ = flag_intermittent(df, group_cols=["SKU"])
+        pd.testing.assert_frame_equal(df, df_before)
+
+    def test_multi_group_cols(self):
+        # (Country, SKU) pairs: (US,1) continuous, (MX,1) intermittent.
+        rows: list[dict] = []
+        for i in range(10):
+            rows.append({"Country": "US", "SKU": 1, "CS": float(i + 1)})
+        for v in [0.0] * 8 + [5.0, 3.0]:
+            rows.append({"Country": "MX", "SKU": 1, "CS": v})
+        df = pd.DataFrame(rows)
+
+        mask = flag_intermittent(df, group_cols=["Country", "SKU"])
+        assert not mask[df["Country"] == "US"].any()
+        assert mask[df["Country"] == "MX"].all()
+
+    def test_nan_treated_as_zero(self):
+        """NaN values are treated as zero demand for the purpose of the
+        zero-ratio calculation.  Documented in the function docstring."""
+        df = pd.DataFrame({"SKU": [1] * 10, "CS": [np.nan] * 8 + [5.0, 3.0]})
+        mask = flag_intermittent(df, group_cols=["SKU"])
+        assert mask.all()
+
+    def test_custom_value_col(self):
+        df = pd.DataFrame(
+            {
+                "SKU": [1] * 5 + [2] * 5,
+                "units": [1.0, 2, 3, 4, 5, 0, 0, 0, 0, 0],
+            }
+        )
+        mask = flag_intermittent(df, group_cols=["SKU"], value_col="units")
+        assert not mask[df["SKU"] == 1].any()
+        assert mask[df["SKU"] == 2].all()
 
 
 class TestCleanZeros:
