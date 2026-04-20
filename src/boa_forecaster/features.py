@@ -66,6 +66,87 @@ class FeatureConfig:
     include_expanding: bool = False
     target_col: str = "y"
 
+    @classmethod
+    def for_frequency(cls, freq: str, **overrides: object) -> FeatureConfig:
+        """Return a ``FeatureConfig`` with sensible defaults for *freq*.
+
+        The default ``FeatureConfig()`` is calibrated for **monthly** series
+        (``lag_periods=[1, 2, 3, 6, 12]``, ``rolling_windows=[3, 6, 12]``).
+        Those values are meaningless for hourly PM2.5 or daily inventory
+        data, where the relevant seasonalities live at different offsets.
+        This factory picks defaults per pandas frequency alias so callers
+        don't have to re-derive them from first principles.
+
+        Chosen defaults (and the reasoning behind each):
+
+        - ``"MS"`` / ``"M"`` (monthly) — lags ``[1, 2, 3, 6, 12]``, windows
+          ``[3, 6, 12]``.  Covers the last quarter, half-year and full year;
+          matches the library's historical default.
+        - ``"W"`` (weekly) — lags ``[1, 2, 4, 13, 26, 52]``, windows
+          ``[4, 13, 52]``.  Captures same-week, two-weeks-back, ~month
+          (4w), ~quarter (13w), ~half-year (26w), and full-year (52w)
+          seasonality common in retail and utility demand.
+        - ``"D"`` (daily) — lags ``[1, 2, 3, 7, 14, 30, 365]``, windows
+          ``[7, 14, 30]``.  Day-of-week effect (lag 7), bi-weekly pay-cycle
+          (lag 14), monthly (lag 30), and annual (lag 365).
+        - ``"h"`` / ``"H"`` (hourly) — lags ``[1, 2, 3, 24, 48, 168]``,
+          windows ``[24, 168]``.  Last three hours for short-horizon
+          momentum; 24 h / 48 h for daily seasonality; 168 h for weekly.
+          Matches the air-quality (PM2.5) feedback in
+          ``tasks/feedback_aire.md`` §1.
+
+        These are **starting points**, not dogma.  Pass ``**overrides`` to
+        patch any field without rebuilding the whole config, e.g.
+        ``FeatureConfig.for_frequency("D", include_expanding=True)`` or
+        ``FeatureConfig.for_frequency("h", lag_periods=[1, 24])``.
+
+        Alias handling mirrors ``_freq_to_period_alias`` in
+        ``preprocessor.py``: both pandas 1.x (``"H"``) and pandas 2.x
+        (``"h"``) spellings are accepted for hourly.  Unrecognised aliases
+        raise ``ValueError`` listing the supported set.
+
+        Args:
+            freq: Pandas DateOffset alias (``"MS"``, ``"M"``, ``"W"``,
+                ``"D"``, ``"h"``, ``"H"``).
+            **overrides: Any ``FeatureConfig`` field to override — e.g.
+                ``lag_periods=[1, 2]`` or ``include_expanding=True``.
+                Invalid field names propagate as ``TypeError`` from the
+                dataclass constructor.
+
+        Returns:
+            A new ``FeatureConfig`` instance.
+
+        Raises:
+            ValueError: If *freq* is not a supported alias.
+            TypeError: If *overrides* contains a key that is not a
+                ``FeatureConfig`` field.
+        """
+        # Frequency → (lag_periods, rolling_windows) map.
+        # Kept inside the method so each call constructs fresh lists —
+        # prevents aliasing between returned configs (mirrors the
+        # default_factory guard on the dataclass fields).
+        presets: dict[str, tuple[list[int], list[int]]] = {
+            "MS": ([1, 2, 3, 6, 12], [3, 6, 12]),
+            "M": ([1, 2, 3, 6, 12], [3, 6, 12]),
+            "W": ([1, 2, 4, 13, 26, 52], [4, 13, 52]),
+            "D": ([1, 2, 3, 7, 14, 30, 365], [7, 14, 30]),
+            "h": ([1, 2, 3, 24, 48, 168], [24, 168]),
+            "H": ([1, 2, 3, 24, 48, 168], [24, 168]),
+        }
+        if freq not in presets:
+            raise ValueError(
+                f"Unsupported frequency alias {freq!r}. "
+                f"Supported aliases: {sorted(presets)} "
+                "(monthly: 'MS'/'M', weekly: 'W', daily: 'D', hourly: 'h'/'H')."
+            )
+        lag_periods, rolling_windows = presets[freq]
+        defaults: dict[str, object] = {
+            "lag_periods": list(lag_periods),
+            "rolling_windows": list(rolling_windows),
+        }
+        defaults.update(overrides)
+        return cls(**defaults)  # type: ignore[arg-type]
+
 
 def _compute_deterministic_features(
     index: pd.DatetimeIndex,
