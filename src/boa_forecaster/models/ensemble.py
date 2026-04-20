@@ -16,6 +16,36 @@ Weighting strategies
   set on the spec (done automatically by :func:`build_ensemble`).  Falls
   back to equal weights when any score is zero or non-finite.
 * ``list[float]`` — explicit weights (normalised to sum to 1).
+
+Weighting caveats
+-----------------
+The ``"inverse_cv_loss"`` strategy assumes every member's
+``best_score`` was produced by a **comparable** cross-validation
+protocol.  When members use different CV semantics this assumption
+breaks and the weighting becomes biased:
+
+* **Inner-validation early stopping** — ``XGBoostSpec`` and
+  ``LightGBMSpec`` carve off the tail of each training fold as an
+  internal validation slice so boosting can early-stop.  The final
+  score therefore reflects training on roughly 80% of the fold, while
+  ``RandomForestSpec`` and ``SARIMASpec`` train on 100% of the fold.
+  The XGB/LGB score is usually slightly *worse* than it would be at
+  full fold size, so ``inverse_cv_loss`` over-weights RF/SARIMA by a
+  small but systematic margin.
+* **Different feature configs** — a member with a richer
+  ``FeatureConfig`` (more lags, rolling windows, calendar features)
+  will tend to score better on clean data and worse on short/sparse
+  series.  Mixing feature configs across members can therefore mask
+  genuine model-quality differences behind a feature-engineering gap.
+* **Different forecast horizons** — all members must share the same
+  ``forecast_horizon``; a mismatch would compare scores computed over
+  different-length windows and the weighting would be meaningless.
+
+When any of these apply, prefer explicit ``list[float]`` weights (e.g.
+learned off-line from a holdout) or fall back to ``"equal"``.  Track a
+feature request in the backlog (see ``tasks/feedback_aire.md`` point 4)
+for a "normalised CV score" option that re-scores every member on the
+same outer-fold protocol before weighting.
 """
 
 from __future__ import annotations
