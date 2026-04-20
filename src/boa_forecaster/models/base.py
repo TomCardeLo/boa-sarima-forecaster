@@ -205,6 +205,7 @@ class ModelSpec(Protocol):
         params: dict,
         metric_fn,
         feature_config: FeatureConfig | None = None,
+        feature_cache: pd.DataFrame | None = None,
     ) -> float: ...
 
     def build_forecaster(

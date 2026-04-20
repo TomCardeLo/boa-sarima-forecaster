@@ -108,6 +108,7 @@ class SARIMASpec:
         params: dict,
         metric_fn,
         feature_config=None,
+        feature_cache=None,
     ) -> float:
         """Fit SARIMAX in-sample and return the metric score.
 
@@ -124,6 +125,7 @@ class SARIMASpec:
             params: Dict with keys ``p, d, q, P, D, Q``.
             metric_fn: Callable ``(y_true, y_pred) -> float``.
             feature_config: Ignored (SARIMA does not use features).
+            feature_cache: Ignored (SARIMA does not use features).
 
         Returns:
             Scalar metric score, or ``OPTIMIZER_PENALTY`` on failure.

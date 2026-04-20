@@ -249,7 +249,7 @@ class FeatureEngineer:
 
         values = series.to_numpy()
         for n in self.config.lag_periods:
-            shifted = np.empty(len(values), dtype=np.float64)
+            shifted: np.ndarray = np.empty(len(values), dtype=np.float64)
             shifted[:n] = np.nan
             shifted[n:] = values[:-n]
             cols[f"lag_{n}"] = shifted
