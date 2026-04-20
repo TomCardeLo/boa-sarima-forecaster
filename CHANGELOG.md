@@ -7,7 +7,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [2.1.0] — Unreleased
+## [2.2.0] — 2026-04-20
+
+Feature release bundling Tracks A/B/C/D of the post-v2.1.0 plan:
+release hygiene, coverage lift, performance, and extensibility
+(CLI + config schema + ensembles).  No breaking API changes —
+additive only.  The `sarima_bayes` compatibility shim still emits
+`DeprecationWarning` and remains importable; internal duplicate
+module files were removed in Track A but the public shim surface
+is preserved until v3.0.
+
+### Added — Extensibility (Track D)
+
+- **Click CLI** (`boa_forecaster.cli`) — `run`, `compare`, and
+  `validate` subcommands invokable via `python -m boa_forecaster`
+  or the `boa-forecaster` console entry point.  Loads `config.yaml`
+  through the new Pydantic schema and dispatches to the existing
+  pipeline / `run_model_comparison` / `walk_forward_validation` APIs.
+  See [`docs/cli.md`](docs/cli.md).
+- **Pydantic v2 config schema** (`config_schema.py`) — strongly-typed
+  validation of `config.yaml` at load time; catches typos, missing
+  keys, and out-of-range values before the pipeline runs.  Replaces
+  ad-hoc dict parsing throughout the CLI layer.
+- **`EnsembleSpec`** (`models/ensemble.py`) — weighted or stacked
+  ensemble over any subset of registered `ModelSpec`s; registered
+  in `MODEL_REGISTRY` and exported from the package root.  See
+  [`docs/ensemble.md`](docs/ensemble.md).
+- **Public API** — `EnsembleSpec` and the CLI module re-exported
+  from `boa_forecaster.__init__`.
+
+### Added — Performance (Track C)
+
+- **Deterministic feature cache** — `FeatureEngineer.build_features()`
+  split into `build_deterministic()` (calendar + trend — window-
+  independent, computed **once per series**) and
+  `build_window_dependent()` (lag + rolling + expanding — per fold).
+  `BaseMLSpec.build_forecaster()` accepts an optional
+  `feature_cache: dict[str, pd.DataFrame]` keyed by `series.name`,
+  reused across walk-forward CV folds.  ~30% speedup on a 60-month
+  series with 10 folds.
+- **Parallel walk-forward CV** — `walk_forward_validation(..., n_jobs: int = 1)`
+  fans out fold evaluation via `joblib.Parallel(backend="loky")`.
+  `n_jobs=1` (default) preserves the pre-existing sequential
+  behaviour; `n_jobs=-1` uses all cores.
+- **`pytest-benchmark` regression suite** (`tests/perf/`) —
+  micro-benchmarks for `weighted_moving_stats_series`,
+  `fill_blanks`, and `optimize_model` on SARIMA.  Weekly CI job
+  compares against a committed baseline JSON.
+
+### Added — Performance (Track A, #9)
+
+- **`weighted_moving_stats_batch`** (`standardization.py`) —
+  vectorised API for clipping multiple series in one call;
+  re-exported from the package root.  Accompanying tests in
+  `tests/unit/test_standardization.py`.
+
+### Added — Tests (Track B)
+
+- **`tests/unit/test_data_loader_errors.py`** — edge-case coverage
+  for bad headers, missing columns, and malformed dates; raises
+  `data_loader.py` to **100%**.
+- **`tests/unit/test_benchmarks_v2.py`** — coverage for the v2
+  `run_model_comparison` path; raises `benchmarks.py` to **95%**.
+- **`tests/unit/test_validation.py` expansion** — additional walk-
+  forward scenarios (including `n_jobs=2`); raises `validation.py`
+  to **98%**.
+- **`tests/unit/test_optional_deps.py`** (Track A) — asserts ML
+  specs (`xgboost`, `lightgbm`) degrade cleanly when optional
+  extras are not installed.
+- **`tests/unit/test_cli.py`**, **`test_config_schema.py`**,
+  **`test_ensemble.py`** (Track D) — full coverage for the new CLI,
+  schema, and ensemble surfaces.
+
+### Added — CI & tooling
+
+- **Security scan step** (`.github/workflows/ci.yml`) — runs on
+  push / PR (Track A).
+- **Weekly performance regression job** — runs `pytest tests/perf/`
+  with baseline comparison (Track C).
+
+### Changed — Performance
+
+- **`optimizer._validate_series` inf-check** — replaced
+  `series.isin([np.inf, -np.inf]).any()` with
+  `np.isinf(series.to_numpy()).any()`.  Short-circuits on the first
+  `inf` instead of scanning the full series, ~10–20× faster on large
+  float arrays.
+
+### Fixed
+
+- **mypy errors on Python 3.11 CI** — narrowing issues in
+  `features.py`, `models/base.py`, and `models/sarima.py` flagged by
+  the stricter 3.11 type-checker.
+
+[2.2.0]: https://github.com/TomCardeLo/boa-forecaster/compare/v2.1.0...v2.2.0
+
+---
+
+## [2.1.0] — 2026-04-17
 
 Feature release on the v2.x line.  Ships the full Phase A–E improvement
 plan (perf, tests, code quality, CI, docs) on top of the v2.0.0 framework
