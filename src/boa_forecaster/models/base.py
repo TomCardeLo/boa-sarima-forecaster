@@ -206,6 +206,7 @@ class ModelSpec(Protocol):
         metric_fn,
         feature_config: FeatureConfig | None = None,
         feature_cache: pd.DataFrame | None = None,
+        trial: optuna.Trial | None = None,
     ) -> float: ...
 
     def build_forecaster(

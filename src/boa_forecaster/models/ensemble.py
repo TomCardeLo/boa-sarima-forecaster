@@ -88,7 +88,15 @@ class EnsembleSpec:
     def suggest_params(self, trial) -> dict:  # pragma: no cover — not TPE-tunable
         return {}
 
-    def evaluate(self, series, params, metric_fn, feature_config=None) -> float:
+    def evaluate(
+        self,
+        series,
+        params,
+        metric_fn,
+        feature_config=None,
+        feature_cache=None,
+        trial=None,
+    ) -> float:
         """Ensembles are post-optimisation compositions, not TPE candidates.
 
         Use :func:`build_ensemble` (which runs ``optimize_model`` per member

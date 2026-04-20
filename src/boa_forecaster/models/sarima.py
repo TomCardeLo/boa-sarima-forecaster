@@ -109,6 +109,7 @@ class SARIMASpec:
         metric_fn,
         feature_config=None,
         feature_cache=None,
+        trial: optuna.Trial | None = None,
     ) -> float:
         """Fit SARIMAX in-sample and return the metric score.
 
@@ -126,6 +127,12 @@ class SARIMASpec:
             metric_fn: Callable ``(y_true, y_pred) -> float``.
             feature_config: Ignored (SARIMA does not use features).
             feature_cache: Ignored (SARIMA does not use features).
+            trial: Active Optuna trial.  SARIMA fits a single in-sample
+                model — there are no intermediate folds to prune against,
+                so the trial is reported once at step 0 and the pruner
+                never engages under default ``n_warmup_steps=1``.  Accepted
+                for protocol compatibility with the tree-based specs
+                (v2.3 E4).
 
         Returns:
             Scalar metric score, or ``OPTIMIZER_PENALTY`` on failure.
@@ -147,9 +154,21 @@ class SARIMASpec:
             )
             fit = model.fit(disp=False)
             pred = fit.predict(start=0, end=len(data) - 1)
-            return float(metric_fn(data, pred))
+            score = float(metric_fn(data, pred))
+        except optuna.TrialPruned:
+            # Defensive: not raised from this branch today, but keep the
+            # contract consistent with ``BaseMLSpec.evaluate`` so future
+            # callers that wrap SARIMA in a pruning loop are safe.
+            raise
         except Exception:
             return OPTIMIZER_PENALTY
+
+        if trial is not None:
+            trial.report(score, step=0)
+            if trial.should_prune():
+                raise optuna.TrialPruned()
+
+        return score
 
     def build_forecaster(self, params: dict, feature_config=None):
         """Return a closure ``forecaster(train: pd.Series) -> pd.Series``.

@@ -34,6 +34,7 @@ import logging
 from typing import Callable
 
 import numpy as np
+import optuna
 import pandas as pd
 
 from boa_forecaster.config import OPTIMIZER_PENALTY
@@ -126,6 +127,7 @@ class BaseMLSpec:
         metric_fn,
         feature_config: FeatureConfig | None = None,
         feature_cache: pd.DataFrame | None = None,
+        trial: optuna.Trial | None = None,
     ) -> float:
         """Evaluate *params* via expanding-window CV.
 
@@ -143,9 +145,18 @@ class BaseMLSpec:
                 of ``series.index``.  The optimiser builds this once per
                 study and threads it through every trial so each fold
                 avoids recomputing calendar / trend columns (v2.2 P1).
+            trial: Active Optuna trial.  When supplied, the running-mean
+                score is reported after each completed fold via
+                ``trial.report`` and ``optuna.TrialPruned`` is raised if the
+                pruner decides the trial is hopeless (v2.3 E4).  ``None``
+                when the spec is invoked directly (e.g. from tests).
 
         Returns:
             Mean metric across valid folds, or ``OPTIMIZER_PENALTY`` on failure.
+
+        Raises:
+            optuna.TrialPruned: Only propagates when *trial* is given and the
+                pruner flags the trial after an intermediate report.
         """
         config = feature_config or self.feature_config
         n = len(series)
@@ -172,6 +183,10 @@ class BaseMLSpec:
                 model = self._fit_fold(X_train, y_train, params)
                 y_pred = recursive_forecast(model, fe, train, len(test))
                 scores.append(metric_fn(test.values, y_pred.values))
+            except optuna.TrialPruned:
+                # Pruning is expected flow-control, not a crash — must escape
+                # the broad ``except Exception`` below so Optuna sees it.
+                raise
             except Exception as exc:  # noqa: BLE001
                 logger.debug(
                     "%s.evaluate fold %d failed: %s",
@@ -180,6 +195,14 @@ class BaseMLSpec:
                     exc,
                 )
                 return OPTIMIZER_PENALTY
+
+            if trial is not None:
+                # Report the running mean after each successful fold — TPE's
+                # MedianPruner compares this against sibling trials at the
+                # same step to decide whether to abort early.
+                trial.report(float(np.mean(scores)), step=k)
+                if trial.should_prune():
+                    raise optuna.TrialPruned()
 
         if not scores:
             return OPTIMIZER_PENALTY
