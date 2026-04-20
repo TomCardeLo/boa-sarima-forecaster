@@ -200,3 +200,25 @@ def test_build_ensemble_without_optimise(synthetic_series: pd.Series) -> None:
     forecaster = spec.build_forecaster(params)
     pred = forecaster(synthetic_series)
     assert np.allclose(pred.values, 100.0)
+
+
+# ── E3: needs_features reflects members ──────────────────────────────────────
+
+
+def test_needs_features_reflects_members() -> None:
+    """``EnsembleSpec.needs_features`` must be the OR across its members.
+
+    Regression for Track E (v2.3) bug: the hardcoded class attribute
+    ``needs_features = False`` lied when the ensemble contained tabular-ML
+    members.  Downstream code that gates feature engineering on this
+    attribute would skip it and hand the raw series to an ML model that
+    needs a ``FeatureEngineer``.
+    """
+    from boa_forecaster.models.random_forest import RandomForestSpec
+    from boa_forecaster.models.sarima import SARIMASpec
+
+    only_sarima = EnsembleSpec([SARIMASpec()], weighting="equal")
+    assert only_sarima.needs_features is False
+
+    mixed = EnsembleSpec([SARIMASpec(), RandomForestSpec()], weighting="equal")
+    assert mixed.needs_features is True

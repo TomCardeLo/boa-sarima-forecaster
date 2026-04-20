@@ -46,7 +46,6 @@ class EnsembleSpec:
     """
 
     name: str = "ensemble"
-    needs_features: bool = False
 
     def __init__(
         self,
@@ -66,6 +65,16 @@ class EnsembleSpec:
         self.member_scores = dict(member_scores) if member_scores else {}
 
     # ── ModelSpec protocol ────────────────────────────────────────────────────
+
+    @property
+    def needs_features(self) -> bool:
+        """``True`` iff **any** member requires a ``FeatureEngineer``.
+
+        Previously hardcoded to ``False``; an ensemble containing a tabular
+        ML member (e.g. ``RandomForestSpec``) would silently lie to any
+        downstream code gating feature engineering on this flag.
+        """
+        return any(getattr(m, "needs_features", False) for m in self.members)
 
     @property
     def search_space(self) -> dict[str, SearchSpaceParam]:
