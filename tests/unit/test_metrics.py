@@ -166,7 +166,75 @@ class TestBuildCombinedMetric:
             build_combined_metric([{"metric": "nonexistent", "weight": 1.0}])
 
     def test_registry_contains_expected_keys(self):
-        assert set(METRIC_REGISTRY.keys()) == {"smape", "rmsle", "mae", "rmse", "mape"}
+        # hit_rate is registered by the G2 work (v2.3.0). We assert a subset
+        # here so that runtime-registered user metrics don't break the check.
+        expected = {"smape", "rmsle", "mae", "rmse", "mape", "hit_rate"}
+        assert expected.issubset(set(METRIC_REGISTRY.keys()))
+
+
+class TestHitRate:
+    """hit_rate computes the fraction of predictions landing in the same
+    bucket as the truth.  Requires caller-supplied bucket edges.
+    """
+
+    def test_hit_rate_basic(self):
+        """Simple edges [0, 10, 20]: true=[5, 15, 25], pred=[7, 14, 100]
+        → first two buckets match (1, 2), third also matches (both above 20).
+        """
+        from boa_forecaster.metrics import hit_rate
+
+        y_true = np.array([5.0, 15.0, 25.0])
+        y_pred = np.array([7.0, 14.0, 100.0])
+        # np.digitize default (right=False) places y in bucket i iff
+        # edges[i-1] <= y < edges[i]. Our three values bucket as (1, 2, 3)
+        # for both true and pred → 100% hit rate.
+        result = hit_rate(y_true, y_pred, edges=[0, 10, 20])
+        assert result == pytest.approx(1.0, abs=1e-6)
+
+    def test_hit_rate_partial_miss(self):
+        from boa_forecaster.metrics import hit_rate
+
+        y_true = np.array([5.0, 15.0, 25.0])
+        y_pred = np.array([5.0, 25.0, 25.0])  # second prediction moves bucket
+        result = hit_rate(y_true, y_pred, edges=[0, 10, 20])
+        # Buckets: true=(1,2,3), pred=(1,3,3) → 2/3 correct.
+        assert result == pytest.approx(2.0 / 3.0, abs=1e-6)
+
+    def test_hit_rate_all_miss(self):
+        from boa_forecaster.metrics import hit_rate
+
+        y_true = np.array([5.0, 5.0, 5.0])
+        y_pred = np.array([15.0, 25.0, 100.0])
+        result = hit_rate(y_true, y_pred, edges=[0, 10, 20])
+        assert result == pytest.approx(0.0, abs=1e-6)
+
+    def test_hit_rate_registered_in_registry(self):
+        assert "hit_rate" in METRIC_REGISTRY
+
+    def test_hit_rate_in_build_combined_metric_with_edges(self):
+        """build_combined_metric must forward 'edges' into hit_rate."""
+        fn = build_combined_metric(
+            [{"metric": "hit_rate", "weight": 1.0, "edges": [0, 10, 20]}]
+        )
+        y_true = np.array([5.0, 15.0, 25.0])
+        y_pred = np.array([7.0, 14.0, 100.0])
+        result = fn(y_true, y_pred)
+        assert result == pytest.approx(1.0, abs=1e-6)
+
+    def test_build_combined_metric_ignores_unknown_kwargs_silently(self):
+        """Extra keys in a component dict that are not accepted by the
+        underlying metric callable are filtered out via inspect.signature
+        — the old {metric, weight} contract must keep working unchanged.
+        """
+        fn = build_combined_metric(
+            [
+                # 'edges' is not accepted by smape; must be filtered out.
+                {"metric": "smape", "weight": 1.0, "edges": [0, 1, 2]},
+            ]
+        )
+        y_true = np.array([100.0, 200.0])
+        y_pred = np.array([110.0, 190.0])
+        assert fn(y_true, y_pred) == pytest.approx(smape(y_true, y_pred), abs=1e-6)
 
 
 class TestCombinedMetricDelegatesToFactory:
