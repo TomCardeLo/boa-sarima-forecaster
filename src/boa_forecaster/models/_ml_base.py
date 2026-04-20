@@ -64,8 +64,18 @@ class BaseMLSpec:
         forecast_horizon: int = 12,
     ) -> None:
         self._check_availability()
-        self.feature_config: FeatureConfig = feature_config or FeatureConfig()
         self.forecast_horizon: int = forecast_horizon
+        if feature_config is None:
+            # Auto-inject ``forecast_horizon`` into the default lag set so the
+            # model sees a lag_h feature — the single most informative predictor
+            # for a h-step-ahead recursive forecast (v2.3 E2).  An explicitly
+            # passed ``feature_config`` is the user's choice and is never
+            # rewritten, even if ``forecast_horizon`` is absent from its lags.
+            lags = [1, 2, 3, 6, 12]
+            if forecast_horizon not in lags:
+                lags.append(forecast_horizon)
+            feature_config = FeatureConfig(lag_periods=sorted(lags))
+        self.feature_config: FeatureConfig = feature_config
 
     # ── Overridable hooks ─────────────────────────────────────────────────────
 
