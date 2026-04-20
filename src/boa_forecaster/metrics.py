@@ -112,6 +112,13 @@ def combined_metric(
     errors in high-volume SKUs.  This function is the objective minimised
     by the Optuna study in ``optimize_arima()``.
 
+    Implementation note: this function is a thin wrapper over
+    :func:`build_combined_metric` so that **every** metric composition path
+    flows through the single registry-aware factory.  Any metric registered
+    at runtime via :func:`register_metric` (including a caller-side override
+    of ``"smape"`` or ``"rmsle"``) is honoured here automatically, keeping
+    the two code paths in lock-step.
+
     Args:
         y_true: Array of observed values. Shape ``(n,)``.
         y_pred: Array of predicted values. Shape ``(n,)``.
@@ -126,9 +133,12 @@ def combined_metric(
         >>> combined_metric(np.array([100.0, 200.0]), np.array([110.0, 190.0]))
         3.683...
     """
-    val_smape = smape(y_true, y_pred)
-    val_rmsle = rmsle(y_true, y_pred)
-    return (w_smape * val_smape) + (w_rmsle * val_rmsle)
+    return build_combined_metric(
+        [
+            {"metric": "smape", "weight": w_smape},
+            {"metric": "rmsle", "weight": w_rmsle},
+        ]
+    )(y_true, y_pred)
 
 
 def mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:

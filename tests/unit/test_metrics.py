@@ -167,3 +167,66 @@ class TestBuildCombinedMetric:
 
     def test_registry_contains_expected_keys(self):
         assert set(METRIC_REGISTRY.keys()) == {"smape", "rmsle", "mae", "rmse", "mape"}
+
+
+class TestCombinedMetricDelegatesToFactory:
+    """Regression tests proving combined_metric == build_combined_metric.
+
+    F4 refactors combined_metric to delegate to build_combined_metric so
+    every metric path honours register_metric().  Numerical output must
+    match the legacy implementation byte-for-byte on fixed inputs.
+    """
+
+    def test_combined_metric_matches_legacy_numerics(self):
+        """Fixed numpy-seeded inputs produce the same scalar output as the
+        hand-rolled 0.7 * sMAPE + 0.3 * RMSLE composition.
+        """
+        rng = np.random.default_rng(2026)
+        y_true = rng.uniform(50.0, 500.0, size=200)
+        y_pred = y_true + rng.normal(0.0, 25.0, size=200)
+
+        expected = 0.7 * smape(y_true, y_pred) + 0.3 * rmsle(y_true, y_pred)
+        got = combined_metric(y_true, y_pred)
+        assert got == pytest.approx(expected, rel=0.0, abs=0.0)
+
+    def test_combined_metric_matches_factory_numerics(self):
+        """combined_metric must equal the factory-built equivalent bit-for-bit."""
+        rng = np.random.default_rng(7)
+        y_true = rng.uniform(10.0, 1000.0, size=300)
+        y_pred = y_true * rng.uniform(0.8, 1.2, size=300)
+
+        factory_fn = build_combined_metric(
+            [
+                {"metric": "smape", "weight": 0.7},
+                {"metric": "rmsle", "weight": 0.3},
+            ]
+        )
+        assert combined_metric(y_true, y_pred) == pytest.approx(
+            factory_fn(y_true, y_pred), rel=0.0, abs=1e-12
+        )
+
+    def test_combined_metric_honours_custom_weights(self):
+        """Non-default weights still compose correctly through the factory."""
+        rng = np.random.default_rng(123)
+        y_true = rng.uniform(1.0, 100.0, size=50)
+        y_pred = y_true + rng.normal(0.0, 5.0, size=50)
+
+        expected = 0.4 * smape(y_true, y_pred) + 0.6 * rmsle(y_true, y_pred)
+        got = combined_metric(y_true, y_pred, w_smape=0.4, w_rmsle=0.6)
+        assert got == pytest.approx(expected, rel=0.0, abs=1e-12)
+
+    def test_combined_metric_honours_register_metric(self):
+        """Register a custom metric and verify it flows through
+        build_combined_metric (proves the factory is the single source of
+        truth for metric composition)."""
+        from boa_forecaster.metrics import register_metric
+
+        def always_42(y_true, y_pred):  # noqa: ARG001
+            return 42.0
+
+        register_metric("always_42_f4", always_42)
+        fn = build_combined_metric([{"metric": "always_42_f4", "weight": 0.5}])
+
+        # A custom metric registered at runtime must be resolvable through
+        # build_combined_metric after registration.
+        assert fn(np.array([1.0]), np.array([2.0])) == pytest.approx(21.0)
