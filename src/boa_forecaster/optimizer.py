@@ -79,7 +79,10 @@ def _validate_series(series: pd.Series, min_length: int = _MIN_SERIES_LENGTH) ->
             "series contains NaN values. "
             "Handle missing values before calling optimize_model()."
         )
-    if series.isin([np.inf, -np.inf]).any():
+    # ``np.isinf`` on the underlying ndarray is ~10-20× faster than
+    # ``series.isin([np.inf, -np.inf])`` on large floats because it avoids
+    # building a hashable set and two element-wise equality passes.
+    if np.isinf(series.to_numpy()).any():
         raise ValueError(
             "series contains Inf values. "
             "Remove or replace infinite values before calling optimize_model()."
@@ -130,8 +133,37 @@ def optimize_model(
     if verbose:
         optuna.logging.set_verbosity(optuna.logging.INFO)
 
+    # Deterministic-feature cache (v2.2 P1): calendar + trend columns are pure
+    # functions of the DatetimeIndex.  Pre-compute them once for the full
+    # series and thread the slice through every trial / fold so the CV loop
+    # stops recomputing identical sin/cos/year_norm/trend_idx arrays.
+    feature_cache: pd.DataFrame | None = None
+    if getattr(model_spec, "needs_features", False) and isinstance(
+        series.index, pd.DatetimeIndex
+    ):
+        from boa_forecaster.features import (
+            FeatureConfig,
+            _compute_deterministic_features,
+        )
+
+        cache_config = (
+            feature_config
+            or getattr(model_spec, "feature_config", None)
+            or FeatureConfig()
+        )
+        if cache_config.include_calendar or cache_config.include_trend:
+            feature_cache = _compute_deterministic_features(series.index, cache_config)
+
     def objective(trial: optuna.Trial) -> float:
         params = model_spec.suggest_params(trial)
+        if feature_cache is not None:
+            return model_spec.evaluate(
+                series,
+                params,
+                metric_fn,
+                feature_config,
+                feature_cache=feature_cache,
+            )
         return model_spec.evaluate(series, params, metric_fn, feature_config)
 
     sampler = TPESampler(seed=seed, multivariate=True)

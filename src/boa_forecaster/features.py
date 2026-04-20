@@ -13,6 +13,20 @@ and earlier.  This is enforced by:
 - Expanding features: ``series.shift(1).expanding()``  →  uses ``y[0..t-1]``
 - Calendar and trend features: deterministic from the DatetimeIndex, never
   derived from future values.
+
+Deterministic-feature caching (v2.2 P1)
+---------------------------------------
+Calendar (sin/cos) and trend (``year_norm``, ``trend_idx``) features are
+pure functions of the ``DatetimeIndex``.  In the optimiser's per-trial CV
+loop they are recomputed every fold even though the index is the same —
+that is wasted work.  ``_compute_deterministic_features`` exposes them as
+a standalone ``pd.DataFrame`` that the optimiser can build **once** for
+the full series index and thread through every fold / recursive-forecast
+step via ``fit_transform(..., feature_cache=...)``.
+
+The cached path is **bit-identical** to the fresh-compute path when the
+cache was built from the same index (covered by
+``tests/unit/test_features.py::test_cache_equivalence_fit_transform``).
 """
 
 from __future__ import annotations
@@ -53,6 +67,50 @@ class FeatureConfig:
     target_col: str = "y"
 
 
+def _compute_deterministic_features(
+    index: pd.DatetimeIndex,
+    config: FeatureConfig,
+) -> pd.DataFrame:
+    """Compute the subset of features that are pure functions of *index*.
+
+    Calendar (month/quarter sin/cos) and trend (``year_norm``, ``trend_idx``)
+    depend only on the ``DatetimeIndex``, never on the observed values.  They
+    can be pre-computed once for the full optimiser series index and sliced
+    per CV fold, avoiding ~3× the work of the current per-fold implementation.
+
+    Args:
+        index: Target ``DatetimeIndex`` (anything else short-circuits to a
+            column-less frame).
+        config: Feature configuration; ``include_calendar`` / ``include_trend``
+            gate which columns are produced.
+
+    Returns:
+        ``pd.DataFrame`` indexed by *index*.  Columns appear in the same order
+        as ``FeatureEngineer.get_feature_names`` produces them so
+        ``_build_features`` can splice the slice in directly.
+    """
+    df = pd.DataFrame(index=index)
+    if not isinstance(index, pd.DatetimeIndex):
+        return df
+
+    if config.include_calendar:
+        months = index.month
+        quarters = index.quarter
+        df["month_sin"] = np.sin(2 * np.pi * months / 12)
+        df["month_cos"] = np.cos(2 * np.pi * months / 12)
+        df["quarter_sin"] = np.sin(2 * np.pi * quarters / 4)
+        df["quarter_cos"] = np.cos(2 * np.pi * quarters / 4)
+
+    if config.include_trend:
+        n = len(index)
+        min_yr = int(index.year.min())
+        yr_range = max(1, int(index.year.max()) - min_yr)
+        df["year_norm"] = (index.year - min_yr) / yr_range
+        df["trend_idx"] = np.arange(n) / max(1, n - 1)
+
+    return df
+
+
 class FeatureEngineer:
     """Transforms ``pd.Series`` → ``(X: pd.DataFrame, y: pd.Series)``.
 
@@ -66,6 +124,22 @@ class FeatureEngineer:
 
     ``fit_transform`` stores the training-window size and year bounds so that
     ``transform`` can extrapolate trend/year features consistently.
+
+    Deterministic-feature cache (optional)
+    --------------------------------------
+    ``fit_transform`` and ``transform`` accept an optional ``feature_cache``
+    kwarg — a ``pd.DataFrame`` produced by
+    ``_compute_deterministic_features`` whose index must be a **superset** of
+    the series index passed to the method.  When provided:
+
+    - The calendar / trend columns are sliced out of the cache via
+      ``cache.loc[series.index]`` instead of being recomputed.
+    - The cache is retained on the instance (``self._cache``) so that
+      subsequent ``transform`` calls inside ``recursive_forecast`` pick it up
+      without the caller having to thread it through explicitly.
+
+    Numerical equivalence vs the no-cache path is guaranteed whenever the
+    cache was computed from the same (or a superset of) the series index.
     """
 
     def __init__(self, config: FeatureConfig | None = None) -> None:
@@ -73,14 +147,24 @@ class FeatureEngineer:
         self._n_train: int | None = None
         self._min_year: int | None = None
         self._year_range: int | None = None
+        self._cache: pd.DataFrame | None = None
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def fit_transform(self, series: pd.Series) -> tuple[pd.DataFrame, pd.Series]:
+    def fit_transform(
+        self,
+        series: pd.Series,
+        feature_cache: pd.DataFrame | None = None,
+    ) -> tuple[pd.DataFrame, pd.Series]:
         """Fit on *series* and return ``(X, y)`` with NaN rows removed.
 
         Args:
             series: Time series with at least ``max(lag_periods) + 1`` points.
+            feature_cache: Optional pre-computed deterministic-feature frame
+                whose index must cover ``series.index``.  When supplied the
+                calendar / trend columns are taken from this cache instead of
+                being recomputed and the cache is retained on the instance so
+                subsequent ``transform`` calls reuse it.
 
         Returns:
             Tuple ``(X, y)`` where ``X`` is the feature DataFrame and ``y``
@@ -96,18 +180,25 @@ class FeatureEngineer:
                 f"max lag = {max_lag}. Need at least {max_lag + 1} points."
             )
 
-        # Store training stats for transform()
         self._n_train = len(series)
         if isinstance(series.index, pd.DatetimeIndex):
             self._min_year = int(series.index.year.min())
             self._year_range = max(1, int(series.index.year.max()) - self._min_year)
 
-        features = self._build_features(series, fit=True)
+        # Retain the cache so recursive_forecast (which calls fe.transform
+        # without knowing about the cache) can still benefit from it.
+        self._cache = feature_cache
+
+        features = self._build_features(series, fit=True, cache=feature_cache)
         y = series.iloc[max_lag:].copy()
         y.name = self.config.target_col
         return features, y
 
-    def transform(self, series: pd.Series) -> pd.DataFrame:
+    def transform(
+        self,
+        series: pd.Series,
+        feature_cache: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
         """Apply the same feature pipeline using stats stored by ``fit_transform``.
 
         Used for recursive forecasting: the extended series (train + predictions
@@ -116,6 +207,9 @@ class FeatureEngineer:
 
         Args:
             series: Series to transform (may be longer than the training set).
+            feature_cache: Optional pre-computed deterministic-feature frame;
+                when ``None`` falls back to the cache stored on the instance
+                by ``fit_transform``.
 
         Returns:
             Feature DataFrame (NaN rows for the first ``max_lag`` positions
@@ -126,15 +220,11 @@ class FeatureEngineer:
         """
         if self._n_train is None:
             raise RuntimeError("Call fit_transform before transform.")
-        return self._build_features(series, fit=False)
+        cache = feature_cache if feature_cache is not None else self._cache
+        return self._build_features(series, fit=False, cache=cache)
 
     def get_feature_names(self) -> list[str]:
-        """Return the ordered list of column names produced by this engineer.
-
-        Note: Calendar and trend names are included when the corresponding
-        config flags are ``True``.  Assumes a ``DatetimeIndex`` input —
-        consistent with ``fit_transform`` / ``transform``.
-        """
+        """Return the ordered list of column names produced by this engineer."""
         names: list[str] = [f"lag_{n}" for n in self.config.lag_periods]
         for w in self.config.rolling_windows:
             names += [f"rolling_mean_{w}", f"rolling_std_{w}"]
@@ -148,7 +238,35 @@ class FeatureEngineer:
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
-    def _build_features(self, series: pd.Series, fit: bool) -> pd.DataFrame:
+    def _compute_window_features(self, series: pd.Series) -> pd.DataFrame:
+        """Compute lag / rolling features (value-dependent).
+
+        Builds columns as a dict of numpy arrays and wraps them into a single
+        ``DataFrame`` at the end to avoid the per-column pandas block-manager
+        overhead that the v2.1 loop incurred.
+        """
+        cols: dict[str, np.ndarray] = {}
+
+        values = series.to_numpy()
+        for n in self.config.lag_periods:
+            shifted: np.ndarray = np.empty(len(values), dtype=np.float64)
+            shifted[:n] = np.nan
+            shifted[n:] = values[:-n]
+            cols[f"lag_{n}"] = shifted
+
+        if self.config.rolling_windows:
+            shifted_series = series.shift(1)
+            for w in self.config.rolling_windows:
+                cols[f"rolling_mean_{w}"] = shifted_series.rolling(w).mean().to_numpy()
+                cols[f"rolling_std_{w}"] = shifted_series.rolling(w).std().to_numpy()
+        return pd.DataFrame(cols, index=series.index)
+
+    def _build_features(
+        self,
+        series: pd.Series,
+        fit: bool,
+        cache: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
         """Build the full feature matrix for *series*.
 
         Args:
@@ -156,56 +274,50 @@ class FeatureEngineer:
             fit: If ``True``, derive normalisation constants from *series*
                  (used by ``fit_transform``).  If ``False``, use stored
                  constants (used by ``transform``).
+            cache: Optional pre-computed deterministic-feature frame covering
+                ``series.index``.  When supplied, calendar / trend columns are
+                sliced from it rather than being recomputed.
 
         Returns:
             Feature DataFrame with the first ``max_lag`` rows removed.
         """
         max_lag = max(self.config.lag_periods)
-        df = pd.DataFrame(index=series.index)
+        df = self._compute_window_features(series)
 
-        # ── Lag features ─────────────────────────────────────────────────────
-        # lag_n[t] = y[t - n]  →  fully causal
-        for n in self.config.lag_periods:
-            df[f"lag_{n}"] = series.shift(n)
+        # ── Deterministic block (calendar + trend) ───────────────────────────
+        if cache is not None:
+            # ``cache`` is allowed to be a superset — align to series.index.
+            det_slice = cache.loc[series.index]
+            for col in det_slice.columns:
+                df[col] = det_slice[col].to_numpy()
+        else:
+            if self.config.include_calendar and isinstance(
+                series.index, pd.DatetimeIndex
+            ):
+                months = series.index.month
+                quarters = series.index.quarter
+                df["month_sin"] = np.sin(2 * np.pi * months / 12)
+                df["month_cos"] = np.cos(2 * np.pi * months / 12)
+                df["quarter_sin"] = np.sin(2 * np.pi * quarters / 4)
+                df["quarter_cos"] = np.cos(2 * np.pi * quarters / 4)
 
-        # ── Rolling features ─────────────────────────────────────────────────
-        # shift(1) ensures rolling window at t uses y[t-1..t-w], not y[t]
-        shifted = series.shift(1)
-        for w in self.config.rolling_windows:
-            df[f"rolling_mean_{w}"] = shifted.rolling(w).mean()
-            df[f"rolling_std_{w}"] = shifted.rolling(w).std()
+            if self.config.include_trend and isinstance(series.index, pd.DatetimeIndex):
+                n_total = len(series)
+                n_train = self._n_train
+                assert n_train is not None  # noqa: S101 — invariant documented above
 
-        # ── Calendar features ─────────────────────────────────────────────────
-        if self.config.include_calendar and isinstance(series.index, pd.DatetimeIndex):
-            months = series.index.month
-            quarters = series.index.quarter
-            df["month_sin"] = np.sin(2 * np.pi * months / 12)
-            df["month_cos"] = np.cos(2 * np.pi * months / 12)
-            df["quarter_sin"] = np.sin(2 * np.pi * quarters / 4)
-            df["quarter_cos"] = np.cos(2 * np.pi * quarters / 4)
+                if fit:
+                    min_yr = int(series.index.year.min())
+                    yr_range = max(1, int(series.index.year.max()) - min_yr)
+                    df["year_norm"] = (series.index.year - min_yr) / yr_range
+                    df["trend_idx"] = np.arange(n_total) / max(1, n_train - 1)
+                else:
+                    df["year_norm"] = (
+                        series.index.year - self._min_year
+                    ) / self._year_range
+                    df["trend_idx"] = np.arange(n_total) / max(1, n_train - 1)
 
-        # ── Trend features ────────────────────────────────────────────────────
-        if self.config.include_trend and isinstance(series.index, pd.DatetimeIndex):
-            n_total = len(series)
-            n_train = self._n_train  # set in fit_transform before _build_features
-            assert n_train is not None  # noqa: S101 — invariant documented above
-
-            if fit:
-                # year_norm: normalised year relative to training year range
-                min_yr = int(series.index.year.min())
-                yr_range = max(1, int(series.index.year.max()) - min_yr)
-                df["year_norm"] = (series.index.year - min_yr) / yr_range
-                # trend_idx: [0.0, ..., 1.0] over training window
-                df["trend_idx"] = np.arange(n_total) / max(1, n_train - 1)
-            else:
-                # Use stored training stats; extrapolates beyond training window
-                df["year_norm"] = (
-                    series.index.year - self._min_year
-                ) / self._year_range
-                df["trend_idx"] = np.arange(n_total) / max(1, n_train - 1)
-
-        # ── Expanding features ────────────────────────────────────────────────
-        # shift(1) ensures causal: expanding stats at t use y[0..t-1]
+        # ── Expanding block (always value-dependent, so never cached) ────────
         if self.config.include_expanding:
             df["expanding_mean"] = series.shift(1).expanding().mean()
             df["expanding_std"] = series.shift(1).expanding().std()

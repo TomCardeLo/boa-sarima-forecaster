@@ -6,7 +6,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from boa_forecaster.features import FeatureConfig, FeatureEngineer
+from boa_forecaster.features import (
+    FeatureConfig,
+    FeatureEngineer,
+    _compute_deterministic_features,
+)
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -17,6 +21,15 @@ def monthly_series():
     rng = np.random.default_rng(0)
     values = 100 + np.arange(24) * 0.5 + rng.normal(0, 2, 24)
     idx = pd.date_range("2022-01-01", periods=24, freq="MS")
+    return pd.Series(values, index=idx)
+
+
+@pytest.fixture
+def long_monthly_series():
+    """60-point monthly series — superset of the 24-point fixture."""
+    rng = np.random.default_rng(1)
+    values = 100 + np.arange(60) * 0.3 + rng.normal(0, 2, 60)
+    idx = pd.date_range("2022-01-01", periods=60, freq="MS")
     return pd.Series(values, index=idx)
 
 
@@ -263,3 +276,93 @@ def test_feature_config_no_shared_mutable_defaults():
     cfg2 = FeatureConfig()
     cfg1.lag_periods.append(99)
     assert 99 not in cfg2.lag_periods
+
+
+# ── Deterministic-feature cache (v2.2 P1) ─────────────────────────────────────
+
+
+def test_compute_deterministic_features_columns(monthly_series, minimal_config):
+    """Cache frame exposes calendar + trend columns only."""
+    cache = _compute_deterministic_features(monthly_series.index, minimal_config)
+    assert {"month_sin", "month_cos", "quarter_sin", "quarter_cos"}.issubset(
+        cache.columns
+    )
+    assert {"year_norm", "trend_idx"}.issubset(cache.columns)
+    # No lag / rolling columns leak into the deterministic cache.
+    assert not any(col.startswith("lag_") for col in cache.columns)
+    assert not any(col.startswith("rolling_") for col in cache.columns)
+
+
+def test_cache_equivalence_fit_transform(monthly_series, minimal_config):
+    """Bit-identical results when cache is computed from the same index.
+
+    This is the correctness gate for the optimiser's cache re-use: if the
+    cached path ever drifts from the fresh-compute path numerically, the
+    optimiser's score would no longer be comparable across runs.
+    """
+    fe_no_cache = FeatureEngineer(minimal_config)
+    X_no_cache, y_no_cache = fe_no_cache.fit_transform(monthly_series)
+
+    cache = _compute_deterministic_features(monthly_series.index, minimal_config)
+    fe_cached = FeatureEngineer(minimal_config)
+    X_cached, y_cached = fe_cached.fit_transform(monthly_series, feature_cache=cache)
+
+    pd.testing.assert_frame_equal(X_no_cache, X_cached, check_exact=True)
+    pd.testing.assert_series_equal(y_no_cache, y_cached, check_exact=True)
+
+
+def test_cache_equivalence_with_expanding(monthly_series):
+    """Expanding block is value-dependent and must not be broken by caching."""
+    config = FeatureConfig(
+        lag_periods=[1, 2],
+        rolling_windows=[2],
+        include_calendar=True,
+        include_trend=True,
+        include_expanding=True,
+    )
+    fe_no_cache = FeatureEngineer(config)
+    X_no_cache, _ = fe_no_cache.fit_transform(monthly_series)
+
+    cache = _compute_deterministic_features(monthly_series.index, config)
+    fe_cached = FeatureEngineer(config)
+    X_cached, _ = fe_cached.fit_transform(monthly_series, feature_cache=cache)
+
+    pd.testing.assert_frame_equal(X_no_cache, X_cached, check_exact=True)
+
+
+def test_cache_superset_slice(long_monthly_series, monthly_series, minimal_config):
+    """Cache built on a superset index must slice correctly for sub-windows."""
+    # Build the cache using the LONG series' index.
+    cache = _compute_deterministic_features(long_monthly_series.index, minimal_config)
+
+    # Slice covers the short series' 24 months entirely.
+    assert monthly_series.index.isin(cache.index).all()
+
+    fe = FeatureEngineer(minimal_config)
+    X, _ = fe.fit_transform(monthly_series, feature_cache=cache)
+
+    # Calendar values must match the short-series months after slicing.
+    expected_month_sin = np.sin(2 * np.pi * monthly_series.index.month / 12)
+    # X has the first max_lag rows dropped; compare against the same slice.
+    max_lag = max(minimal_config.lag_periods)
+    np.testing.assert_allclose(
+        X["month_sin"].to_numpy(),
+        expected_month_sin[max_lag:],
+    )
+
+
+def test_cache_persisted_for_recursive_transform(monthly_series, minimal_config):
+    """After fit_transform(feature_cache=...), transform() picks up the cache."""
+    cache = _compute_deterministic_features(monthly_series.index, minimal_config)
+    fe = FeatureEngineer(minimal_config)
+    fe.fit_transform(monthly_series, feature_cache=cache)
+
+    # Cache is retained on the instance so subsequent transform calls benefit
+    # (recursive_forecast does not thread the kwarg explicitly).
+    assert fe._cache is cache
+
+    # Transforming the same series again must still produce cache-equivalent output.
+    X_again = fe.transform(monthly_series)
+    fe_fresh = FeatureEngineer(minimal_config)
+    X_fresh, _ = fe_fresh.fit_transform(monthly_series)
+    pd.testing.assert_frame_equal(X_again, X_fresh, check_exact=True)
