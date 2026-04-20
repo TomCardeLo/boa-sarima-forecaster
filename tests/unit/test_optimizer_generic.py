@@ -31,7 +31,15 @@ class MockModelSpec:
     def suggest_params(self, trial: optuna.Trial) -> dict:
         return {"k": trial.suggest_int("k", 1, 10)}
 
-    def evaluate(self, series, params: dict, metric_fn, feature_config=None) -> float:
+    def evaluate(
+        self,
+        series,
+        params: dict,
+        metric_fn,
+        feature_config=None,
+        feature_cache=None,
+        trial=None,
+    ) -> float:
         return float(abs(params["k"] - 5))
 
     def build_forecaster(self, params: dict, feature_config=None):
@@ -55,7 +63,15 @@ class AlwaysPenaltySpec:
     def suggest_params(self, trial: optuna.Trial) -> dict:
         return {"k": trial.suggest_int("k", 1, 3)}
 
-    def evaluate(self, series, params: dict, metric_fn, feature_config=None) -> float:
+    def evaluate(
+        self,
+        series,
+        params: dict,
+        metric_fn,
+        feature_config=None,
+        feature_cache=None,
+        trial=None,
+    ) -> float:
         return OPTIMIZER_PENALTY
 
     def build_forecaster(self, params: dict, feature_config=None):

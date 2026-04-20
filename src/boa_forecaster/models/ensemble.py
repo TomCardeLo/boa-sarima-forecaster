@@ -16,6 +16,36 @@ Weighting strategies
   set on the spec (done automatically by :func:`build_ensemble`).  Falls
   back to equal weights when any score is zero or non-finite.
 * ``list[float]`` — explicit weights (normalised to sum to 1).
+
+Weighting caveats
+-----------------
+The ``"inverse_cv_loss"`` strategy assumes every member's
+``best_score`` was produced by a **comparable** cross-validation
+protocol.  When members use different CV semantics this assumption
+breaks and the weighting becomes biased:
+
+* **Inner-validation early stopping** — ``XGBoostSpec`` and
+  ``LightGBMSpec`` carve off the tail of each training fold as an
+  internal validation slice so boosting can early-stop.  The final
+  score therefore reflects training on roughly 80% of the fold, while
+  ``RandomForestSpec`` and ``SARIMASpec`` train on 100% of the fold.
+  The XGB/LGB score is usually slightly *worse* than it would be at
+  full fold size, so ``inverse_cv_loss`` over-weights RF/SARIMA by a
+  small but systematic margin.
+* **Different feature configs** — a member with a richer
+  ``FeatureConfig`` (more lags, rolling windows, calendar features)
+  will tend to score better on clean data and worse on short/sparse
+  series.  Mixing feature configs across members can therefore mask
+  genuine model-quality differences behind a feature-engineering gap.
+* **Different forecast horizons** — all members must share the same
+  ``forecast_horizon``; a mismatch would compare scores computed over
+  different-length windows and the weighting would be meaningless.
+
+When any of these apply, prefer explicit ``list[float]`` weights (e.g.
+learned off-line from a holdout) or fall back to ``"equal"``.  Track a
+feature request in the backlog (see ``tasks/feedback_aire.md`` point 4)
+for a "normalised CV score" option that re-scores every member on the
+same outer-fold protocol before weighting.
 """
 
 from __future__ import annotations
@@ -46,7 +76,6 @@ class EnsembleSpec:
     """
 
     name: str = "ensemble"
-    needs_features: bool = False
 
     def __init__(
         self,
@@ -68,6 +97,16 @@ class EnsembleSpec:
     # ── ModelSpec protocol ────────────────────────────────────────────────────
 
     @property
+    def needs_features(self) -> bool:
+        """``True`` iff **any** member requires a ``FeatureEngineer``.
+
+        Previously hardcoded to ``False``; an ensemble containing a tabular
+        ML member (e.g. ``RandomForestSpec``) would silently lie to any
+        downstream code gating feature engineering on this flag.
+        """
+        return any(getattr(m, "needs_features", False) for m in self.members)
+
+    @property
     def search_space(self) -> dict[str, SearchSpaceParam]:
         """An ensemble has no hyperparameters of its own."""
         return {}
@@ -79,7 +118,15 @@ class EnsembleSpec:
     def suggest_params(self, trial) -> dict:  # pragma: no cover — not TPE-tunable
         return {}
 
-    def evaluate(self, series, params, metric_fn, feature_config=None) -> float:
+    def evaluate(
+        self,
+        series,
+        params,
+        metric_fn,
+        feature_config=None,
+        feature_cache=None,
+        trial=None,
+    ) -> float:
         """Ensembles are post-optimisation compositions, not TPE candidates.
 
         Use :func:`build_ensemble` (which runs ``optimize_model`` per member
@@ -178,12 +225,33 @@ class EnsembleSpec:
 # ── High-level helper ─────────────────────────────────────────────────────────
 
 
+def _optimize_one_member(
+    member: ModelSpec,
+    series: pd.Series,
+    n_calls: int,
+    optimize_kwargs: dict,
+) -> tuple[str, dict, float]:
+    """Module-level worker: run ``optimize_model`` for one ensemble member.
+
+    Defined at module scope (not as a nested closure) so ``loky`` can pickle
+    it by import path — mirrors the pattern used by
+    ``boa_forecaster.validation._run_fold_pinned``.  Returns a simple tuple
+    to keep the payload pickle-friendly.
+    """
+    # Local import avoids circular dependency (optimizer imports models).
+    from boa_forecaster.optimizer import optimize_model
+
+    result = optimize_model(series, member, n_calls=n_calls, **optimize_kwargs)
+    return member.name, dict(result.best_params), float(result.best_score)
+
+
 def build_ensemble(
     series: pd.Series,
     specs: list[ModelSpec],
     weighting: WeightingStrategy = "inverse_cv_loss",
     optimise: bool = True,
     n_calls: int = 30,
+    n_jobs: int = 1,
     **optimize_kwargs,
 ) -> tuple[EnsembleSpec, dict[str, dict]]:
     """Optimise each member and return a ready-to-use ``EnsembleSpec``.
@@ -195,27 +263,54 @@ def build_ensemble(
         optimise: When ``False``, skip TPE and use each spec's first
             ``warm_starts`` entry as its params (test-fixture convenience).
         n_calls: TPE trials per member when ``optimise=True``.
+        n_jobs: Parallel workers used to optimise members concurrently.
+            Default ``1`` preserves backwards-compatible sequential
+            behaviour.  ``-1`` uses all available CPUs.  Ignored when
+            ``optimise=False`` (warm-start path is trivial).  Each worker
+            runs its own Optuna study — with the default seed each member
+            is deterministic, so ``n_jobs=1`` and ``n_jobs>=2`` produce
+            identical output.
         **optimize_kwargs: Forwarded to :func:`optimize_model`.
 
     Returns:
         ``(spec, params_per_member)`` — plug the dict straight into
         ``spec.build_forecaster(params_per_member)(train)``.
     """
-    # Local import avoids circular dependency (optimizer imports models).
-    from boa_forecaster.optimizer import optimize_model
-
     params_per_member: dict[str, dict] = {}
     member_scores: dict[str, float] = {}
 
-    for member in specs:
-        if optimise:
-            result = optimize_model(series, member, n_calls=n_calls, **optimize_kwargs)
-            params_per_member[member.name] = dict(result.best_params)
-            member_scores[member.name] = float(result.best_score)
-        else:
+    if not optimise:
+        # Fast path — no TPE, no parallelism required.
+        for member in specs:
             fallback = member.warm_starts[0] if member.warm_starts else {}
             params_per_member[member.name] = dict(fallback)
             member_scores[member.name] = 1.0
+        spec = EnsembleSpec(specs, weighting=weighting, member_scores=member_scores)
+        return spec, params_per_member
+
+    if n_jobs is None or n_jobs == 1:
+        results = [
+            _optimize_one_member(member, series, n_calls, optimize_kwargs)
+            for member in specs
+        ]
+    else:
+        # joblib is already a core dep (validation.py uses it).  Each member
+        # is an independent Optuna study, so loky-backed process parallelism
+        # gives a near-linear speedup on multi-member ensembles.
+        from joblib import Parallel, delayed
+
+        results = Parallel(n_jobs=n_jobs, backend="loky")(
+            delayed(_optimize_one_member)(member, series, n_calls, optimize_kwargs)
+            for member in specs
+        )
+
+    # Preserve the caller's spec order in the returned dicts regardless of
+    # completion order from the workers.
+    result_by_name = {name: (params, score) for name, params, score in results}
+    for member in specs:
+        params, score = result_by_name[member.name]
+        params_per_member[member.name] = params
+        member_scores[member.name] = score
 
     spec = EnsembleSpec(specs, weighting=weighting, member_scores=member_scores)
     return spec, params_per_member

@@ -124,3 +124,98 @@ class TestValidateSeries:
     def test_accepts_valid_series(self, synthetic_series):
         result = optimize_model(synthetic_series, SARIMASpec(), n_calls=2)
         assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# E4 — MedianPruner activation
+# ---------------------------------------------------------------------------
+
+
+class TestMedianPruner:
+    """Optuna ``MedianPruner`` should discard obviously-bad trials early.
+
+    We synthesise a noisy series where many SARIMA parameterisations are
+    very bad, so the pruner has ample material to prune against.  The key
+    assertions:
+
+    1. At least one trial reaches state ``PRUNED`` after ~30 trials.
+    2. A study that successfully returns (any mix of COMPLETE + PRUNED) is
+       **not** a fallback — pruning is normal, not a crash.
+    """
+
+    def _study(self, synthetic_series):
+        # 40 trials beats the n_startup_trials=5 + n_warmup_steps=1 defaults
+        # by enough margin that pruning is near-deterministic on noisy data.
+        spec = SARIMASpec()
+        result = optimize_model(synthetic_series, spec, n_calls=40, seed=7)
+        return result
+
+    def test_median_pruner_discards_bad_trials(self, long_series):
+        """With ~30 trials on a noisy series, ≥1 trial should be PRUNED.
+
+        Uses ``RandomForestSpec`` because it reports per-fold (multiple
+        ``trial.report`` calls) whereas SARIMA has only one evaluation
+        step and can never reach the ``n_warmup_steps=1`` threshold.
+        """
+        pytest.importorskip("sklearn")
+
+        import optuna
+        from optuna.samplers import TPESampler
+
+        from boa_forecaster.features import FeatureConfig
+        from boa_forecaster.metrics import build_combined_metric
+        from boa_forecaster.models.random_forest import RandomForestSpec
+
+        # Keep the feature matrix small so 30 trials stay fast.
+        cfg = FeatureConfig(
+            lag_periods=[1, 2, 3],
+            rolling_windows=[3],
+            include_calendar=False,
+            include_trend=False,
+        )
+        spec = RandomForestSpec(feature_config=cfg, forecast_horizon=6)
+        metric_fn = build_combined_metric(
+            [{"metric": "smape", "weight": 0.7}, {"metric": "rmsle", "weight": 0.3}]
+        )
+
+        def objective(trial):
+            params = spec.suggest_params(trial)
+            return spec.evaluate(long_series, params, metric_fn, trial=trial)
+
+        sampler = TPESampler(seed=7, multivariate=True)
+        pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=1)
+        study = optuna.create_study(
+            direction="minimize", sampler=sampler, pruner=pruner
+        )
+        for w in spec.warm_starts:
+            study.enqueue_trial(w)
+        study.optimize(objective, n_trials=30)
+
+        pruned = study.get_trials(
+            deepcopy=False, states=(optuna.trial.TrialState.PRUNED,)
+        )
+        assert len(pruned) >= 1, (
+            f"expected at least one pruned trial, got states "
+            f"{[t.state.name for t in study.trials]}"
+        )
+
+    def test_pruned_study_is_not_a_fallback(self, long_series):
+        """A study that completes normally (with or without prunes) is NOT a fallback.
+
+        Pruning is expected flow-control; ``is_fallback`` must stay ``False``
+        so downstream callers don't treat pruned studies as crashed studies.
+        """
+        pytest.importorskip("sklearn")
+
+        from boa_forecaster.features import FeatureConfig
+        from boa_forecaster.models.random_forest import RandomForestSpec
+
+        cfg = FeatureConfig(
+            lag_periods=[1, 2, 3],
+            rolling_windows=[3],
+            include_calendar=False,
+            include_trend=False,
+        )
+        spec = RandomForestSpec(feature_config=cfg, forecast_horizon=6)
+        result = optimize_model(long_series, spec, n_calls=20, seed=7)
+        assert result.is_fallback is False

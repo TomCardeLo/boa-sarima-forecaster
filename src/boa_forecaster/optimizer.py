@@ -163,11 +163,22 @@ def optimize_model(
                 metric_fn,
                 feature_config,
                 feature_cache=feature_cache,
+                trial=trial,
             )
-        return model_spec.evaluate(series, params, metric_fn, feature_config)
+        return model_spec.evaluate(
+            series, params, metric_fn, feature_config, trial=trial
+        )
 
     sampler = TPESampler(seed=seed, multivariate=True)
-    study = optuna.create_study(direction="minimize", sampler=sampler)
+    # MedianPruner (v2.3 E4): abort trials whose intermediate fold scores
+    # are worse than the median of completed trials at the same step.
+    # ``n_startup_trials=5`` lets TPE gather a baseline before pruning
+    # engages; ``n_warmup_steps=1`` ensures each trial completes at least
+    # one full fold before becoming pruneable.  The study crashes on
+    # anything else — ``TrialPruned`` is caught by Optuna internally, so
+    # the outer ``try/except Exception`` below never sees it.
+    pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=1)
+    study = optuna.create_study(direction="minimize", sampler=sampler, pruner=pruner)
 
     for warm_start in model_spec.warm_starts:
         study.enqueue_trial(warm_start)
