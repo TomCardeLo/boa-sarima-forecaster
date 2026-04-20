@@ -187,12 +187,33 @@ class EnsembleSpec:
 # ── High-level helper ─────────────────────────────────────────────────────────
 
 
+def _optimize_one_member(
+    member: ModelSpec,
+    series: pd.Series,
+    n_calls: int,
+    optimize_kwargs: dict,
+) -> tuple[str, dict, float]:
+    """Module-level worker: run ``optimize_model`` for one ensemble member.
+
+    Defined at module scope (not as a nested closure) so ``loky`` can pickle
+    it by import path — mirrors the pattern used by
+    ``boa_forecaster.validation._run_fold_pinned``.  Returns a simple tuple
+    to keep the payload pickle-friendly.
+    """
+    # Local import avoids circular dependency (optimizer imports models).
+    from boa_forecaster.optimizer import optimize_model
+
+    result = optimize_model(series, member, n_calls=n_calls, **optimize_kwargs)
+    return member.name, dict(result.best_params), float(result.best_score)
+
+
 def build_ensemble(
     series: pd.Series,
     specs: list[ModelSpec],
     weighting: WeightingStrategy = "inverse_cv_loss",
     optimise: bool = True,
     n_calls: int = 30,
+    n_jobs: int = 1,
     **optimize_kwargs,
 ) -> tuple[EnsembleSpec, dict[str, dict]]:
     """Optimise each member and return a ready-to-use ``EnsembleSpec``.
@@ -204,27 +225,54 @@ def build_ensemble(
         optimise: When ``False``, skip TPE and use each spec's first
             ``warm_starts`` entry as its params (test-fixture convenience).
         n_calls: TPE trials per member when ``optimise=True``.
+        n_jobs: Parallel workers used to optimise members concurrently.
+            Default ``1`` preserves backwards-compatible sequential
+            behaviour.  ``-1`` uses all available CPUs.  Ignored when
+            ``optimise=False`` (warm-start path is trivial).  Each worker
+            runs its own Optuna study — with the default seed each member
+            is deterministic, so ``n_jobs=1`` and ``n_jobs>=2`` produce
+            identical output.
         **optimize_kwargs: Forwarded to :func:`optimize_model`.
 
     Returns:
         ``(spec, params_per_member)`` — plug the dict straight into
         ``spec.build_forecaster(params_per_member)(train)``.
     """
-    # Local import avoids circular dependency (optimizer imports models).
-    from boa_forecaster.optimizer import optimize_model
-
     params_per_member: dict[str, dict] = {}
     member_scores: dict[str, float] = {}
 
-    for member in specs:
-        if optimise:
-            result = optimize_model(series, member, n_calls=n_calls, **optimize_kwargs)
-            params_per_member[member.name] = dict(result.best_params)
-            member_scores[member.name] = float(result.best_score)
-        else:
+    if not optimise:
+        # Fast path — no TPE, no parallelism required.
+        for member in specs:
             fallback = member.warm_starts[0] if member.warm_starts else {}
             params_per_member[member.name] = dict(fallback)
             member_scores[member.name] = 1.0
+        spec = EnsembleSpec(specs, weighting=weighting, member_scores=member_scores)
+        return spec, params_per_member
+
+    if n_jobs is None or n_jobs == 1:
+        results = [
+            _optimize_one_member(member, series, n_calls, optimize_kwargs)
+            for member in specs
+        ]
+    else:
+        # joblib is already a core dep (validation.py uses it).  Each member
+        # is an independent Optuna study, so loky-backed process parallelism
+        # gives a near-linear speedup on multi-member ensembles.
+        from joblib import Parallel, delayed
+
+        results = Parallel(n_jobs=n_jobs, backend="loky")(
+            delayed(_optimize_one_member)(member, series, n_calls, optimize_kwargs)
+            for member in specs
+        )
+
+    # Preserve the caller's spec order in the returned dicts regardless of
+    # completion order from the workers.
+    result_by_name = {name: (params, score) for name, params, score in results}
+    for member in specs:
+        params, score = result_by_name[member.name]
+        params_per_member[member.name] = params
+        member_scores[member.name] = score
 
     spec = EnsembleSpec(specs, weighting=weighting, member_scores=member_scores)
     return spec, params_per_member

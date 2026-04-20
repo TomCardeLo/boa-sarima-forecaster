@@ -202,6 +202,49 @@ def test_build_ensemble_without_optimise(synthetic_series: pd.Series) -> None:
     assert np.allclose(pred.values, 100.0)
 
 
+# ── E1: parallel build_ensemble reproducibility ─────────────────────────────
+
+
+def test_build_ensemble_parallel_matches_sequential() -> None:
+    """``n_jobs=1`` vs ``n_jobs=2`` must produce identical optimisation output.
+
+    Each member is optimised by an Optuna study with the same seed, so the
+    sequential and parallel paths must converge on bit-identical
+    ``best_params`` and ``best_score``.  We use SARIMA (fast, core-only) to
+    keep the test cheap; two members exercise the Parallel dispatch.
+    """
+    import inspect
+
+    from boa_forecaster.models.sarima import SARIMASpec
+
+    # ``n_jobs`` must be an **explicit** parameter on build_ensemble, not
+    # silently forwarded via **optimize_kwargs.  Guard against regression:
+    sig = inspect.signature(build_ensemble)
+    assert "n_jobs" in sig.parameters, "build_ensemble must expose n_jobs kwarg"
+
+    rng = np.random.default_rng(123)
+    idx = pd.date_range("2019-01-01", periods=48, freq="MS")
+    series = pd.Series(100.0 + np.arange(48) * 0.3 + rng.normal(0, 1.0, 48), index=idx)
+
+    specs_seq = [SARIMASpec(), SARIMASpec()]
+    specs_par = [SARIMASpec(), SARIMASpec()]
+    # Differentiate member names so the params_per_member dict has distinct
+    # keys (both default to "sarima" which collapses in the dict — not a
+    # fair parallel-vs-sequential comparison).
+    specs_seq[1].name = "sarima_b"
+    specs_par[1].name = "sarima_b"
+
+    spec_seq, params_seq = build_ensemble(
+        series, specs_seq, weighting="equal", optimise=True, n_calls=5, n_jobs=1
+    )
+    spec_par, params_par = build_ensemble(
+        series, specs_par, weighting="equal", optimise=True, n_calls=5, n_jobs=2
+    )
+
+    assert params_seq == params_par
+    assert spec_seq.member_scores == spec_par.member_scores
+
+
 # ── E3: needs_features reflects members ──────────────────────────────────────
 
 
