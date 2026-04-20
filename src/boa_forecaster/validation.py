@@ -92,7 +92,10 @@ def walk_forward_validation(
         model_fn: Callable ``(train: pd.Series) -> pd.Series``.  The returned
             Series must contain exactly ``test_size`` predictions aligned with
             the test window.
-        n_folds: Number of walk-forward folds.  Must be >= 3.
+        n_folds: Number of walk-forward folds.  Must be >= 1.  Values below 3
+            are accepted but carry high variance in the resulting metric
+            estimate — prefer ``n_folds >= 3`` in production use.  The default
+            of 3 is kept for backwards compatibility.
         test_size: Number of observations in each test window.
         min_train_size: Minimum number of observations in the first training
             window (fold 0).
@@ -113,7 +116,7 @@ def walk_forward_validation(
         ``test_end``, plus one column per metric.
 
     Raises:
-        ValueError: If ``n_folds < 3`` or the series is too short.
+        ValueError: If ``n_folds < 1`` or the series is too short.
 
     Example:
         >>> import numpy as np, pandas as pd
@@ -127,8 +130,8 @@ def walk_forward_validation(
         >>> len(result)
         3
     """
-    if n_folds < 3:
-        raise ValueError(f"n_folds must be >= 3, got {n_folds}")
+    if n_folds < 1:
+        raise ValueError(f"n_folds must be >= 1, got {n_folds}")
 
     n = len(series)
     required = min_train_size + n_folds * test_size

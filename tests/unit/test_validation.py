@@ -86,9 +86,36 @@ class TestWalkForwardValidation:
         )
         assert (result["sMAPE"] >= 0).all()
 
-    def test_wfv_raises_on_1_fold(self, long_series):
+    def test_wfv_accepts_single_fold(self, long_series):
+        """n_folds=1 is now accepted (high variance, but valid)."""
+        result = walk_forward_validation(
+            long_series,
+            _fixed_horizon_model(6),
+            n_folds=1,
+            test_size=6,
+            min_train_size=24,
+        )
+        assert len(result) == 1
+        assert list(result["fold"]) == [1]
+
+    def test_wfv_accepts_two_folds(self, long_series):
+        """n_folds=2 is now accepted (high variance, but valid)."""
+        result = walk_forward_validation(
+            long_series,
+            _fixed_horizon_model(6),
+            n_folds=2,
+            test_size=6,
+            min_train_size=24,
+        )
+        assert len(result) == 2
+        assert list(result["fold"]) == [1, 2]
+
+    def test_wfv_raises_on_zero_or_negative_folds(self, long_series):
+        """n_folds must still be strictly >= 1."""
         with pytest.raises(ValueError):
-            walk_forward_validation(long_series, _fixed_horizon_model(6), n_folds=1)
+            walk_forward_validation(long_series, _fixed_horizon_model(6), n_folds=0)
+        with pytest.raises(ValueError):
+            walk_forward_validation(long_series, _fixed_horizon_model(6), n_folds=-1)
 
     def test_wfv_raises_if_too_short(self):
         rng = np.random.default_rng(0)
