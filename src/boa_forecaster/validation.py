@@ -76,10 +76,11 @@ def walk_forward_validation(
     series: pd.Series,
     model_fn: Callable[[pd.Series], pd.Series],
     n_folds: int = 3,
-    test_size: int = 12,
+    test_size: int | None = None,
     min_train_size: int = 24,
     metrics_fn: dict[str, Callable[..., float]] | None = None,
     n_jobs: int = 1,
+    forecast_horizon: int | None = None,
 ) -> pd.DataFrame:
     """Evaluate *model_fn* using an expanding-window walk-forward scheme.
 
@@ -96,7 +97,10 @@ def walk_forward_validation(
             are accepted but carry high variance in the resulting metric
             estimate — prefer ``n_folds >= 3`` in production use.  The default
             of 3 is kept for backwards compatibility.
-        test_size: Number of observations in each test window.
+        test_size: Number of observations in each test window.  If ``None``
+            (the default), falls back to ``forecast_horizon`` when provided,
+            otherwise to ``12``.  Passing ``test_size`` explicitly always
+            wins over ``forecast_horizon``.
         min_train_size: Minimum number of observations in the first training
             window (fold 0).
         metrics_fn: Mapping of metric-name → callable ``(y_true, y_pred) ->
@@ -109,6 +113,12 @@ def walk_forward_validation(
             If ``model_fn`` (or an object it closes over) is not picklable,
             the call automatically falls back to sequential execution and
             logs a warning.
+        forecast_horizon: Optional convenience alias used as the default
+            ``test_size`` when the latter is not explicitly passed.  Letting
+            callers parametrise a whole pipeline by a single horizon value
+            avoids the silent mismatch between "the horizon the model is
+            tuned for" and "the window WFV evaluates on".  Ignored when
+            ``test_size`` is passed explicitly.
 
     Returns:
         DataFrame with one row per fold and columns:
@@ -132,6 +142,13 @@ def walk_forward_validation(
     """
     if n_folds < 1:
         raise ValueError(f"n_folds must be >= 1, got {n_folds}")
+
+    # Resolve effective test window length.  The sentinel ``None`` lets us
+    # distinguish an explicit ``test_size=12`` (which must always win) from
+    # "caller passed nothing", which should fall back to ``forecast_horizon``
+    # when provided, or to the historical default of 12 otherwise.
+    if test_size is None:
+        test_size = forecast_horizon if forecast_horizon is not None else 12
 
     n = len(series)
     required = min_train_size + n_folds * test_size
@@ -255,7 +272,8 @@ def validate_by_group(
             Defaults to ``"MS"`` (month start).
         **kwargs: Extra keyword arguments forwarded to
             ``walk_forward_validation()`` — ``n_folds``, ``test_size``,
-            ``min_train_size``, ``metrics_fn``.
+            ``min_train_size``, ``metrics_fn``, ``n_jobs``,
+            ``forecast_horizon``.
 
     Returns:
         Concatenated DataFrame of all fold results, with ``group_cols``

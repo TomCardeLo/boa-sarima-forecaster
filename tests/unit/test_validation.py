@@ -117,6 +117,77 @@ class TestWalkForwardValidation:
         with pytest.raises(ValueError):
             walk_forward_validation(long_series, _fixed_horizon_model(6), n_folds=-1)
 
+    def test_test_size_defaults_to_forecast_horizon(self, long_series):
+        """When test_size is not passed, forecast_horizon drives fold length."""
+        result = walk_forward_validation(
+            long_series,
+            _fixed_horizon_model(6),
+            n_folds=3,
+            min_train_size=24,
+            forecast_horizon=6,
+        )
+        # 3 folds with test_size=6 → last test_end row index minus first test_start = 3*6 = 18 steps
+        # Simpler: assert fold windows each contain 6 observations.
+        # Fold 1 test range is min_train_size .. min_train_size + test_size - 1
+        # i.e. [24, 29], fold 2 [30, 35], fold 3 [36, 41].
+        expected_ends = [
+            long_series.index[29],
+            long_series.index[35],
+            long_series.index[41],
+        ]
+        assert list(result["test_end"]) == expected_ends
+
+    def test_explicit_test_size_wins_over_forecast_horizon(self, long_series):
+        """If both test_size and forecast_horizon are passed, test_size wins."""
+        result = walk_forward_validation(
+            long_series,
+            _fixed_horizon_model(6),
+            n_folds=3,
+            test_size=6,
+            min_train_size=24,
+            forecast_horizon=24,  # would overflow the series; must be ignored
+        )
+        assert len(result) == 3
+
+    def test_test_size_defaults_to_12_when_nothing_passed(self, long_series):
+        """Back-compat: no test_size, no forecast_horizon → default of 12."""
+        # long_series is 60 months; with min_train_size=24 and test_size=12,
+        # we can fit 3 folds (24 + 3*12 = 60).
+        result = walk_forward_validation(
+            long_series,
+            _fixed_horizon_model(12),
+            n_folds=3,
+            min_train_size=24,
+        )
+        assert len(result) == 3
+        # test_size should be 12 → fold 1 window ends at index 35.
+        assert result["test_end"].iloc[0] == long_series.index[35]
+
+    def test_validate_by_group_forwards_forecast_horizon(self):
+        """validate_by_group must pass forecast_horizon through to WFV."""
+        rng = np.random.default_rng(42)
+        rows = []
+        for sku in [1, 2]:
+            dates = pd.date_range("2019-01-01", periods=60, freq="MS")
+            values = 100.0 + rng.normal(0, 2, 60)
+            for d, v in zip(dates, values):
+                rows.append({"SKU": sku, "Date": d, "CS": float(v)})
+        df = pd.DataFrame(rows)
+
+        result = validate_by_group(
+            df,
+            group_cols=["SKU"],
+            target_col="CS",
+            date_col="Date",
+            model_fn=_fixed_horizon_model(6),
+            freq="MS",
+            n_folds=3,
+            min_train_size=24,
+            forecast_horizon=6,
+        )
+        # 2 SKUs × 3 folds = 6 rows, each fold window is 6 observations.
+        assert len(result) == 6
+
     def test_wfv_raises_if_too_short(self):
         rng = np.random.default_rng(0)
         short = pd.Series(
