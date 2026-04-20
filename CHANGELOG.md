@@ -7,6 +7,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.3.0] — 2026-04-20
+
+Correctness & ecosystem release bundling Tracks E/F/G of the post-v2.2
+plan.  Four silent-correctness bugs fixed, quality-hardening touch-ups
+on the validation/metric/preprocessor surface, and small ecosystem
+primitives surfaced by a real-world consumer.  No breaking API
+changes — additive and behaviour-tightening only.
+
+### Fixed — Correctness (Track E)
+
+- **`EnsembleSpec.needs_features` now reflects its members** (E3) —
+  previously a hardcoded class attribute `False`, which lied whenever
+  the ensemble contained an ML member (e.g. `RandomForestSpec`) whose
+  `needs_features` is `True`.  Any downstream code that gated feature
+  engineering on the protocol attribute would silently skip it.  The
+  attribute is now a `@property` returning
+  `any(m.needs_features for m in self.members)`.
+- **`BaseMLSpec` auto-injects `forecast_horizon` into default
+  `FeatureConfig.lag_periods`** (E2) — setting
+  `RandomForestSpec(forecast_horizon=24)` used to leave the lag list
+  at `[1, 2, 3, 6, 12]`, so the model never saw `lag_24` (the single
+  most informative feature for that horizon).  Explicitly-passed
+  `feature_config` is **not** overridden.
+- **Optuna `MedianPruner` now wired into `optimize_model`** (E4) —
+  bad-hyperparameter trials were previously run to completion across
+  all CV folds before being discarded.  `MedianPruner(n_startup_trials=5,
+  n_warmup_steps=1)` is now attached to the study, and the `trial`
+  handle is threaded through `evaluate` so each completed fold calls
+  `trial.report(...)` and `trial.should_prune()`.  `optuna.TrialPruned`
+  is re-raised past the fallback branch.  Expected TPE wall-time
+  reduction: 20–40% with no quality loss.
+
+### Changed — Performance (Track E)
+
+- **`build_ensemble` parallelised** (E1) — member optimisation now
+  dispatches through `joblib.Parallel(backend="loky")` with a new
+  `n_jobs` kwarg (default `1` for backwards compatibility; `-1` uses
+  all cores).  Same seed yields identical `member_scores` and
+  `params_per_member` between `n_jobs=1` and `n_jobs=2`.  Expected
+  wall-time reduction for a 4-member ensemble on 4 cores: ~75%.
+
+### Added — Quality hardening (Track F)
+
+- **`hit_rate(y_true, y_pred, edges)` metric** (F3) — bucket-accuracy
+  metric for regulatory reporting (air-quality AQI bands, demand
+  buckets, inventory tiers).  Registered in the metric registry and
+  exported from the package root.  Combine into an objective via
+  `build_combined_metric([{"metric": "hit_rate", "weight": 1.0,
+  "edges": [...]}])`.
+- **`flag_intermittent(df, group_cols, value_col, threshold=0.7)`
+  helper** (F2) — returns a boolean mask of groups whose zero-ratio
+  meets/exceeds `threshold`.  Complements `clean_zeros`, which only
+  filters *flat-zero* groups; intermittent series like
+  `[0,0,0,5,0,0,0,3,0,0]` pass `clean_zeros` but degrade SARIMA/GBM
+  accuracy.  This is a flag, not a filter — the caller decides
+  whether to route them to Croston/SBA, drop them, or keep them.
+  NaN values are treated as zero.  Exported from the package root.
+
+### Changed — Quality hardening (Track F)
+
+- **`walk_forward_validation` accepts `n_folds >= 1`** (F1) —
+  previously hard-floored at `n_folds >= 3`.  `n_folds < 3` carries a
+  docstring warning about high variance but is now allowed.  Default
+  remains `3`.  `validate_by_group` forwards the relaxed floor.
+- **`walk_forward_validation(..., forecast_horizon=None)`** (F2) —
+  new kwarg; if `test_size` is unspecified, the fold window defaults
+  to `forecast_horizon` (falling back to `12` if both are `None`).
+  Existing callers passing explicit `test_size=` are unaffected.
+- **`combined_metric` now delegates to `build_combined_metric`** (F4) —
+  the 0.7·sMAPE + 0.3·RMSLE composition was previously re-implemented
+  manually outside the registry, so `register_metric` had no effect on
+  it.  Both paths now share one code path, and `build_combined_metric`
+  passes component-specific kwargs (e.g. `edges` for `hit_rate`)
+  through via `inspect.signature` filtering.
+
+### Added — Ecosystem (Track G)
+
+- **`FeatureConfig.for_frequency(freq, **overrides)` classmethod** (G1) —
+  returns a frequency-appropriate `FeatureConfig`:
+  - `"MS"`/`"M"` — monthly defaults (current behaviour preserved).
+  - `"W"` — weekly lags `[1, 2, 4, 13, 26, 52]`, weekly rollings.
+  - `"D"` — daily lags `[1, 7, 14, 28]`.
+  - `"h"`/`"H"` — hourly lags `[1, 24, 48, 168]`.
+
+  Overrides are merged on top of the frequency defaults; unknown
+  frequency aliases and override keys raise `ValueError`.  Default
+  `FeatureConfig()` stays monthly to avoid breaking changes.
+- **Docs: "Weighting caveats" section in `EnsembleSpec` docstring**
+  (G3) — documents that `inverse_cv_loss` weighting is **biased** when
+  members use different CV semantics (e.g. XGB with early-stopping
+  over an inner validation split vs. RF trained on the full fold).
+  Not a bug, but a usage trap flagged by a production consumer.
+
+### Contributors
+
+Tracks E/F/G executed in parallel by three Opus agents; plan,
+review, and release orchestration in main thread.
+
+---
+
 ## [2.2.0] — 2026-04-20
 
 Feature release bundling Tracks A/B/C/D of the post-v2.1.0 plan:
