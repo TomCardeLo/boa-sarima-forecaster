@@ -1,9 +1,11 @@
 """Data preprocessing utilities for monthly sales time series.
 
-This module provides two operations applied before model fitting:
+This module provides three operations applied before model fitting:
 
 1. ``clean_zeros`` – removes SKU series with zero cumulative demand.
 2. ``fill_blanks`` – fills missing calendar months with zero demand.
+3. ``flag_intermittent`` – returns a boolean mask identifying groups whose
+   zero-ratio meets a threshold (does not mutate or remove rows).
 
 All functions operate on ``pd.DataFrame`` inputs and return copies so that
 the caller's original data is never modified in-place.
@@ -111,6 +113,56 @@ def clean_zeros(
     if n_removed:
         logger.info("clean_zeros: removed %d zero-demand rows.", n_removed)
     return df[mask].copy()
+
+
+def flag_intermittent(
+    df: pd.DataFrame,
+    group_cols: list[str] | None = None,
+    value_col: str = "CS",
+    threshold: float = 0.7,
+) -> pd.Series:
+    """Flag groups whose zero-ratio meets or exceeds a threshold.
+
+    Intermittent demand (many zeros interleaved with sparse non-zero spikes)
+    is poorly handled by ARIMA and gradient-boosting models; specialised
+    methods such as Croston or SBA are typically more accurate on such
+    series.  This function identifies them without removing or modifying the
+    data, leaving the choice of downstream treatment to the caller.
+
+    NaN values in ``value_col`` are treated as zero demand.  This mirrors the
+    convention used by :func:`fill_blanks` (missing periods are zero-filled)
+    and yields a conservative flag — a group with many NaNs is a candidate
+    for specialised treatment regardless of whether those gaps originated as
+    recorded zeros or as missing data.
+
+    Args:
+        df: Input DataFrame with at least ``group_cols`` and ``value_col``.
+        group_cols: Columns that define a unique time series
+            (e.g. ``["SKU"]`` or ``["Country", "SKU"]``).  Defaults to
+            ``["SKU"]``.
+        value_col: Column containing demand values.  Defaults to ``"CS"``.
+        threshold: Minimum zero-ratio required for a group to be flagged.
+            Defaults to ``0.7`` (70% zero observations).  Must be in
+            ``[0.0, 1.0]``.
+
+    Returns:
+        Boolean ``pd.Series`` aligned with ``df.index``: ``True`` where the
+        row belongs to a flagged group, ``False`` otherwise.  The caller
+        decides whether to filter, route, or annotate the flagged rows.
+
+    Example:
+        >>> mask = flag_intermittent(df, group_cols=["SKU"])
+        >>> intermittent_df = df[mask]
+        >>> continuous_df   = df[~mask]
+    """
+    if group_cols is None:
+        group_cols = ["SKU"]
+
+    # ``fillna(0.0)`` before comparison so NaN counts as a zero observation.
+    zero_ratio = df.groupby(group_cols)[value_col].transform(
+        lambda x: (x.fillna(0.0) == 0).mean()
+    )
+    return zero_ratio >= threshold
 
 
 def fill_blanks(
