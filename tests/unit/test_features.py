@@ -366,3 +366,95 @@ def test_cache_persisted_for_recursive_transform(monthly_series, minimal_config)
     fe_fresh = FeatureEngineer(minimal_config)
     X_fresh, _ = fe_fresh.fit_transform(monthly_series)
     pd.testing.assert_frame_equal(X_again, X_fresh, check_exact=True)
+
+
+# ── Frequency-aware defaults (v2.3 G1) ────────────────────────────────────────
+
+
+class TestFrequencyDefaults:
+    """FeatureConfig.for_frequency ergonomic factory for non-monthly users.
+
+    Feedback evidence: tasks/feedback_aire.md §1 — hourly air-quality
+    pipelines need lag_24 / lag_48 / lag_168; our monthly defaults
+    ``[1, 2, 3, 6, 12]`` provide zero signal at those horizons.
+    """
+
+    def test_monthly_matches_default(self):
+        """``for_frequency("MS")`` must equal the zero-arg FeatureConfig."""
+        default = FeatureConfig()
+        monthly = FeatureConfig.for_frequency("MS")
+        assert monthly.lag_periods == default.lag_periods
+        assert monthly.rolling_windows == default.rolling_windows
+        assert monthly.include_calendar == default.include_calendar
+        assert monthly.include_trend == default.include_trend
+        assert monthly.include_expanding == default.include_expanding
+
+    def test_monthly_m_alias_matches_default(self):
+        """``"M"`` (period alias) is accepted as a monthly synonym."""
+        default = FeatureConfig()
+        assert FeatureConfig.for_frequency("M").lag_periods == default.lag_periods
+
+    def test_weekly_includes_seasonal_lag(self):
+        """Weekly defaults must carry lag_52 (annual seasonality)."""
+        cfg = FeatureConfig.for_frequency("W")
+        assert 52 in cfg.lag_periods
+        # Short-horizon lags must also survive.
+        assert 1 in cfg.lag_periods
+        assert 2 in cfg.lag_periods
+
+    def test_daily_includes_weekly_lag(self):
+        """Daily defaults must carry lag_7 (weekly seasonality)."""
+        cfg = FeatureConfig.for_frequency("D")
+        assert 7 in cfg.lag_periods
+        assert 365 in cfg.lag_periods  # annual
+        assert 7 in cfg.rolling_windows
+
+    def test_hourly_includes_daily_lag(self):
+        """Hourly defaults must carry lag_24 (daily seasonality) and lag_168 (weekly)."""
+        cfg = FeatureConfig.for_frequency("h")
+        assert 24 in cfg.lag_periods
+        assert 168 in cfg.lag_periods
+        assert 24 in cfg.rolling_windows
+
+    def test_hourly_capital_h_alias(self):
+        """Pandas 1.x uppercase ``"H"`` yields the same config as lowercase ``"h"``."""
+        lower = FeatureConfig.for_frequency("h")
+        upper = FeatureConfig.for_frequency("H")
+        assert lower.lag_periods == upper.lag_periods
+        assert lower.rolling_windows == upper.rolling_windows
+
+    def test_overrides_take_precedence(self):
+        """`**overrides` must win over the frequency-derived defaults."""
+        cfg = FeatureConfig.for_frequency("D", lag_periods=[1])
+        assert cfg.lag_periods == [1]
+        # Other fields keep the daily defaults.
+        assert 7 in cfg.rolling_windows
+
+    def test_overrides_can_toggle_flags(self):
+        """Boolean overrides (e.g. include_expanding=True) are honoured."""
+        cfg = FeatureConfig.for_frequency("D", include_expanding=True)
+        assert cfg.include_expanding is True
+        # Frequency defaults still apply to non-overridden fields.
+        assert 7 in cfg.lag_periods
+
+    def test_unknown_freq_raises(self):
+        """Unknown alias must raise ValueError that lists supported aliases."""
+        with pytest.raises(ValueError) as exc:
+            FeatureConfig.for_frequency("fortnight")
+        msg = str(exc.value)
+        # Helpful message: names the bad input and enumerates what's accepted.
+        assert "fortnight" in msg
+        for alias in ("MS", "W", "D", "h"):
+            assert alias in msg
+
+    def test_lists_are_independent_copies(self):
+        """Two calls must not share the same underlying list objects."""
+        cfg1 = FeatureConfig.for_frequency("D")
+        cfg2 = FeatureConfig.for_frequency("D")
+        cfg1.lag_periods.append(999)
+        assert 999 not in cfg2.lag_periods
+
+    def test_unknown_override_key_raises(self):
+        """Overrides must be real FeatureConfig fields (TypeError for typos)."""
+        with pytest.raises(TypeError):
+            FeatureConfig.for_frequency("D", lag_period=[1])  # typo: missing 's'
