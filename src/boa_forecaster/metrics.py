@@ -20,7 +20,9 @@ can use ``0.6 × MAE + 0.4 × RMSE``.
 
 from __future__ import annotations
 
+import inspect
 import threading
+from collections.abc import Iterable
 from typing import Callable
 
 import numpy as np
@@ -112,6 +114,13 @@ def combined_metric(
     errors in high-volume SKUs.  This function is the objective minimised
     by the Optuna study in ``optimize_arima()``.
 
+    Implementation note: this function is a thin wrapper over
+    :func:`build_combined_metric` so that **every** metric composition path
+    flows through the single registry-aware factory.  Any metric registered
+    at runtime via :func:`register_metric` (including a caller-side override
+    of ``"smape"`` or ``"rmsle"``) is honoured here automatically, keeping
+    the two code paths in lock-step.
+
     Args:
         y_true: Array of observed values. Shape ``(n,)``.
         y_pred: Array of predicted values. Shape ``(n,)``.
@@ -126,9 +135,12 @@ def combined_metric(
         >>> combined_metric(np.array([100.0, 200.0]), np.array([110.0, 190.0]))
         3.683...
     """
-    val_smape = smape(y_true, y_pred)
-    val_rmsle = rmsle(y_true, y_pred)
-    return (w_smape * val_smape) + (w_rmsle * val_rmsle)
+    return build_combined_metric(
+        [
+            {"metric": "smape", "weight": w_smape},
+            {"metric": "rmsle", "weight": w_rmsle},
+        ]
+    )(y_true, y_pred)
 
 
 def mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -208,37 +220,121 @@ def mape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(100.0 * np.mean(np.abs(y_true - y_pred) / (np.abs(y_true) + epsilon)))
 
 
+def hit_rate(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    edges: Iterable[float],
+) -> float:
+    """Compute the fraction of predictions that fall in the same bucket as truth.
+
+    Useful for regulatory / tiered reporting (air quality bands, inventory
+    tiers, risk categories) where absolute accuracy matters less than
+    landing in the correct category.  Buckets are defined by the caller via
+    ``edges``, passed unchanged to :func:`numpy.digitize`.
+
+    Formula::
+
+        buckets_true = np.digitize(y_true, edges)
+        buckets_pred = np.digitize(y_pred, edges)
+        hit_rate     = mean(buckets_true == buckets_pred)
+
+    Args:
+        y_true: Array of observed values. Shape ``(n,)``.
+        y_pred: Array of predicted values. Shape ``(n,)``.
+        edges: Monotonically increasing sequence of bucket boundaries.  For
+            ``k`` edges the partition is ``(-inf, e0], (e0, e1], …, (e_{k-1}, inf)``
+            — the same convention used by :func:`numpy.digitize`.
+
+    Returns:
+        Hit-rate in ``[0.0, 1.0]`` (higher is better — note the polarity is
+        inverted relative to the other metrics in this module).
+
+    Example:
+        >>> import numpy as np
+        >>> hit_rate(np.array([5, 15]), np.array([7, 14]), edges=[0, 10, 20])
+        1.0
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    edge_array = np.asarray(list(edges), dtype=float)
+    buckets_true = np.digitize(y_true, edge_array)
+    buckets_pred = np.digitize(y_pred, edge_array)
+    return float(np.mean(buckets_true == buckets_pred))
+
+
 # Registry mapping metric names (as used in config.yaml) to their callables.
 # Extend this dict to expose additional metrics to the configuration layer.
-METRIC_REGISTRY: dict[str, Callable[[np.ndarray, np.ndarray], float]] = {
+METRIC_REGISTRY: dict[str, Callable[..., float]] = {
     "smape": smape,
     "rmsle": rmsle,
     "mae": mae,
     "rmse": rmse,
     "mape": mape,
+    "hit_rate": hit_rate,
 }
 
 
-def register_metric(name: str, fn: Callable[[np.ndarray, np.ndarray], float]) -> None:
+def register_metric(name: str, fn: Callable[..., float]) -> None:
     """Thread-safe registration of a custom metric into ``METRIC_REGISTRY``."""
     with _registry_lock:
         METRIC_REGISTRY[name] = fn
 
 
+# Reserved keys in a component dict that drive the factory itself rather
+# than the underlying metric callable.
+_FACTORY_RESERVED_KEYS: frozenset[str] = frozenset({"metric", "weight"})
+
+
+def _filter_kwargs_for(fn: Callable[..., float], kwargs: dict) -> dict:
+    """Filter *kwargs* to the subset accepted by *fn*'s signature.
+
+    Metrics without extra kwargs (the existing ``{metric, weight}`` contract)
+    see an empty dict, which keeps their call sites completely unchanged.
+    Metrics that advertise extra keyword parameters (e.g. ``hit_rate`` with
+    ``edges``) receive only the matching keys — so a caller can safely
+    include metric-specific configuration in one component dict without
+    polluting the others.
+    """
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        # Builtins and some C-extensions don't expose a signature — fall back
+        # to passing nothing, which matches the legacy contract.
+        return {}
+    params = sig.parameters
+    accepts_var_kw = any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+    if accepts_var_kw:
+        return dict(kwargs)
+    return {k: v for k, v in kwargs.items() if k in params}
+
+
 def build_combined_metric(
     components: list[dict],
 ) -> Callable[[np.ndarray, np.ndarray], float]:
-    """Build a weighted metric callable from a list of ``{metric, weight}`` dicts.
+    """Build a weighted metric callable from a list of component dicts.
 
     This factory is the extension point for customising the optimisation
     objective.  Any combination of registered metrics and weights is
     supported, making the library applicable to contexts beyond demand
     forecasting (e.g. revenue, price, or count series).
 
+    Extra keys beyond ``"metric"`` and ``"weight"`` are forwarded as keyword
+    arguments to the underlying metric, **filtered** via
+    :func:`inspect.signature` so only parameters the metric actually accepts
+    are passed.  This keeps the legacy ``{"metric", "weight"}`` contract
+    working unchanged while letting bucketed metrics like :func:`hit_rate`
+    receive their required configuration (e.g. ``edges``).
+
     Args:
         components: List of dicts, each with:
             - ``"metric"`` (str): name of a metric in ``METRIC_REGISTRY``.
             - ``"weight"`` (float): scalar weight for that metric.
+            - (optional) any additional kwargs accepted by the underlying
+              metric (e.g. ``"edges"`` for ``hit_rate``).  Keys that are not
+              accepted by the callable's signature are silently ignored —
+              the old contract is a strict subset.
             Weights do not need to sum to 1, but it is recommended for
             interpretability.
 
@@ -257,6 +353,11 @@ def build_combined_metric(
         ... ])
         >>> fn(np.array([100.0]), np.array([110.0]))
         10.0
+        >>> fn = build_combined_metric([
+        ...     {"metric": "hit_rate", "weight": 1.0, "edges": [0, 10, 20]},
+        ... ])
+        >>> fn(np.array([5, 15]), np.array([7, 14]))
+        1.0
     """
     for item in components:
         name = item["metric"]
@@ -266,11 +367,16 @@ def build_combined_metric(
                 f"Available metrics: {sorted(METRIC_REGISTRY)}"
             )
 
-    pairs = [
-        (METRIC_REGISTRY[item["metric"]], float(item["weight"])) for item in components
-    ]
+    # Pre-compute the callable, its pre-filtered kwargs, and the weight for
+    # each component so the returned closure doesn't re-introspect on every
+    # invocation.
+    compiled: list[tuple[Callable[..., float], dict, float]] = []
+    for item in components:
+        fn = METRIC_REGISTRY[item["metric"]]
+        extras = {k: v for k, v in item.items() if k not in _FACTORY_RESERVED_KEYS}
+        compiled.append((fn, _filter_kwargs_for(fn, extras), float(item["weight"])))
 
     def _metric(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-        return sum(w * fn(y_true, y_pred) for fn, w in pairs)
+        return sum(w * fn(y_true, y_pred, **kw) for fn, kw, w in compiled)
 
     return _metric
