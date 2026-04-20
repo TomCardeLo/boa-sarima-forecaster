@@ -101,3 +101,26 @@ jobs:
 
       - name: Run slow tests
         run: pytest tests/ -v --tb=short -m slow --durations=10
+
+      - name: Run perf benchmarks (regression gate)
+        # `--benchmark-autosave` writes `.benchmarks/<machine>/<runid>.json`
+        # so comparisons can accumulate run-over-run.  `--benchmark-compare`
+        # (no argument) uses the latest previously saved run on this machine
+        # as the baseline; `--benchmark-compare-fail=mean:20%` fails the job
+        # if any bench's mean time regresses by more than 20% versus that
+        # baseline (noise-tolerant, catches real regressions).
+        run: |
+          pytest tests/perf/ -v --tb=short -m perf \
+            --benchmark-only \
+            --benchmark-autosave \
+            --benchmark-compare \
+            --benchmark-compare-fail=mean:20%
+
+      - name: Upload benchmark artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-benchmark-${{ github.run_id }}
+          path: .benchmarks/
+          if-no-files-found: ignore
+          retention-days: 90

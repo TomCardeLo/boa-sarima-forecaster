@@ -3,7 +3,8 @@
 Public functions
 ----------------
 walk_forward_validation
-    Evaluate a single model over multiple out-of-sample folds.
+    Evaluate a single model over multiple out-of-sample folds.  Supports
+    optional process-parallelism over folds via ``n_jobs``.
 validate_by_group
     Apply walk_forward_validation to every group in a multi-series DataFrame.
 """
@@ -11,6 +12,7 @@ validate_by_group
 from __future__ import annotations
 
 import logging
+import pickle
 from typing import Callable
 
 import pandas as pd
@@ -20,6 +22,56 @@ from boa_forecaster.metrics import rmsle, smape
 logger = logging.getLogger(__name__)
 
 
+def _run_fold(
+    i: int,
+    series: pd.Series,
+    model_fn: Callable[[pd.Series], pd.Series],
+    min_train_size: int,
+    test_size: int,
+    metrics_fn: dict[str, Callable[..., float]],
+) -> dict:
+    """Evaluate a single walk-forward fold.
+
+    Extracted from the inline loop so ``joblib.Parallel`` can dispatch folds
+    to worker processes.  Returns the result row as a plain ``dict`` — pandas
+    concatenation is deferred to the caller to keep this function
+    pickle-friendly.
+    """
+    train_end_idx = min_train_size + i * test_size
+    test_end_idx = min_train_size + (i + 1) * test_size
+
+    train = series.iloc[:train_end_idx]
+    test = series.iloc[train_end_idx:test_end_idx]
+
+    row: dict = {
+        "fold": i + 1,
+        "train_start": train.index[0],
+        "train_end": train.index[-1],
+        "test_start": test.index[0],
+        "test_end": test.index[-1],
+    }
+
+    try:
+        predictions = model_fn(train)
+        y_true = test.values
+        y_pred = predictions.values
+        if len(y_pred) > len(y_true):
+            y_pred = y_pred[: len(y_true)]
+        elif len(y_pred) < len(y_true):
+            raise ValueError(
+                f"model_fn returned {len(y_pred)} predictions but test window "
+                f"has {len(y_true)} observations."
+            )
+        for name, fn in metrics_fn.items():
+            row[name] = fn(y_true, y_pred)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Fold %d failed: %s", i + 1, exc)
+        for name in metrics_fn:
+            row[name] = float("nan")
+
+    return row
+
+
 def walk_forward_validation(
     series: pd.Series,
     model_fn: Callable[[pd.Series], pd.Series],
@@ -27,6 +79,7 @@ def walk_forward_validation(
     test_size: int = 12,
     min_train_size: int = 24,
     metrics_fn: dict[str, Callable[..., float]] | None = None,
+    n_jobs: int = 1,
 ) -> pd.DataFrame:
     """Evaluate *model_fn* using an expanding-window walk-forward scheme.
 
@@ -45,6 +98,14 @@ def walk_forward_validation(
             window (fold 0).
         metrics_fn: Mapping of metric-name → callable ``(y_true, y_pred) ->
             float``.  Defaults to ``{"sMAPE": smape, "RMSLE": rmsle}``.
+        n_jobs: Number of parallel worker processes for fold evaluation.
+            ``1`` (default) keeps the historical sequential behaviour; values
+            ``>= 2`` dispatch via ``joblib.Parallel(backend="loky")``.  Every
+            worker is wrapped in ``threadpoolctl.threadpool_limits(1)`` to
+            stop BLAS/OpenMP oversubscription from erasing the parallel win.
+            If ``model_fn`` (or an object it closes over) is not picklable,
+            the call automatically falls back to sequential execution and
+            logs a warning.
 
     Returns:
         DataFrame with one row per fold and columns:
@@ -81,43 +142,90 @@ def walk_forward_validation(
     if metrics_fn is None:
         metrics_fn = {"sMAPE": smape, "RMSLE": rmsle}
 
-    rows = []
-    for i in range(n_folds):
-        train_end_idx = min_train_size + i * test_size
-        test_end_idx = min_train_size + (i + 1) * test_size
-
-        train = series.iloc[:train_end_idx]
-        test = series.iloc[train_end_idx:test_end_idx]
-
-        row: dict = {
-            "fold": i + 1,
-            "train_start": train.index[0],
-            "train_end": train.index[-1],
-            "test_start": test.index[0],
-            "test_end": test.index[-1],
-        }
-
-        try:
-            predictions = model_fn(train)
-            y_true = test.values
-            y_pred = predictions.values
-            if len(y_pred) > len(y_true):
-                y_pred = y_pred[: len(y_true)]
-            elif len(y_pred) < len(y_true):
-                raise ValueError(
-                    f"model_fn returned {len(y_pred)} predictions but test window "
-                    f"has {len(y_true)} observations."
-                )
-            for name, fn in metrics_fn.items():
-                row[name] = fn(y_true, y_pred)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Fold %d failed: %s", i + 1, exc)
-            for name in metrics_fn:
-                row[name] = float("nan")
-
-        rows.append(row)
+    rows: list[dict]
+    if n_jobs is not None and n_jobs >= 2:
+        rows = _run_folds_parallel(
+            n_folds, series, model_fn, min_train_size, test_size, metrics_fn, n_jobs
+        )
+    else:
+        rows = [
+            _run_fold(i, series, model_fn, min_train_size, test_size, metrics_fn)
+            for i in range(n_folds)
+        ]
 
     return pd.DataFrame(rows)
+
+
+def _run_fold_pinned(
+    i: int,
+    series: pd.Series,
+    model_fn: Callable[[pd.Series], pd.Series],
+    min_train_size: int,
+    test_size: int,
+    metrics_fn: dict[str, Callable[..., float]],
+) -> dict:
+    """Module-level worker: run a fold with BLAS/OpenMP pinned to 1 thread.
+
+    Defined at module scope (not as a nested closure) so loky can pickle it
+    by import path rather than via cloudpickle's closure machinery — the
+    latter fails to un-serialise on the worker side in some environments.
+    """
+    from threadpoolctl import threadpool_limits
+
+    with threadpool_limits(limits=1):
+        return _run_fold(i, series, model_fn, min_train_size, test_size, metrics_fn)
+
+
+def _run_folds_parallel(
+    n_folds: int,
+    series: pd.Series,
+    model_fn: Callable[[pd.Series], pd.Series],
+    min_train_size: int,
+    test_size: int,
+    metrics_fn: dict[str, Callable[..., float]],
+    n_jobs: int,
+) -> list[dict]:
+    """Dispatch ``_run_fold`` across ``n_jobs`` worker processes.
+
+    Each worker pins BLAS / OpenMP to a single thread to prevent
+    oversubscription.  If pickling fails (e.g. ``model_fn`` closes over a
+    local lambda that cloudpickle cannot serialise), we log a warning and
+    fall back to a sequential loop so the caller's contract
+    (``pd.DataFrame`` with the right shape) is never broken by a
+    performance optimisation.
+    """
+    try:
+        from joblib import Parallel, delayed
+    except ImportError as exc:  # pragma: no cover — joblib is a core dep
+        logger.warning(
+            "Parallel fold execution unavailable (%s); running sequentially.",
+            exc,
+        )
+        return [
+            _run_fold(i, series, model_fn, min_train_size, test_size, metrics_fn)
+            for i in range(n_folds)
+        ]
+
+    try:
+        return Parallel(n_jobs=n_jobs, backend="loky")(
+            delayed(_run_fold_pinned)(
+                i, series, model_fn, min_train_size, test_size, metrics_fn
+            )
+            for i in range(n_folds)
+        )
+    except (pickle.PicklingError, AttributeError, TypeError) as exc:
+        # ``loky`` wraps pickling errors in several flavours (PicklingError,
+        # AttributeError for un-importable closures, TypeError for
+        # non-picklable objects).  Fall back to sequential so the run still
+        # completes.
+        logger.warning(
+            "Parallel fold dispatch failed (%s); falling back to sequential.",
+            exc,
+        )
+        return [
+            _run_fold(i, series, model_fn, min_train_size, test_size, metrics_fn)
+            for i in range(n_folds)
+        ]
 
 
 def validate_by_group(

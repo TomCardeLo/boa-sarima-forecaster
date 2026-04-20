@@ -34,6 +34,13 @@ def _fixed_horizon_model(horizon):
     return _fn
 
 
+def _picklable_naive_model(train: pd.Series) -> pd.Series:
+    """Module-level model_fn (picklable) so joblib/loky workers can import it."""
+    freq = train.index.freq or "MS"
+    idx = pd.date_range(start=train.index[-1], periods=7, freq=freq)[1:]
+    return pd.Series([float(train.iloc[-1])] * 6, index=idx)
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -166,6 +173,69 @@ class TestWalkForwardValidation:
         assert any(
             "predictions" in rec.message.lower() for rec in caplog.records
         ), "Expected a WARNING about undersized predictions."
+
+    @pytest.mark.parametrize("n_jobs", [1, 2])
+    def test_wfv_parallel_matches_sequential(self, long_series, n_jobs):
+        """Parallel fold dispatch must produce identical results to sequential.
+
+        Uses a module-level model_fn (picklable) so loky workers can import it.
+        """
+        result = walk_forward_validation(
+            long_series,
+            _picklable_naive_model,
+            n_folds=3,
+            test_size=6,
+            min_train_size=24,
+            n_jobs=n_jobs,
+        )
+        assert len(result) == 3
+        assert list(result["fold"]) == [1, 2, 3]
+        assert (result["sMAPE"] >= 0).all()
+
+    def test_wfv_parallel_pickling_error_falls_back(
+        self, long_series, caplog, monkeypatch
+    ):
+        """PicklingError raised by joblib must trigger sequential fallback.
+
+        We monkey-patch ``joblib.Parallel`` to raise ``pickle.PicklingError``
+        regardless of inputs, which guarantees the fallback branch runs even
+        though loky's cloudpickle normally handles closures transparently.
+        """
+        import pickle
+
+        import joblib
+
+        class _AlwaysFailParallel:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __call__(self, _iter):
+                raise pickle.PicklingError("synthetic failure for test")
+
+        monkeypatch.setattr(joblib, "Parallel", _AlwaysFailParallel)
+        # The implementation imports inside _run_folds_parallel, so patch
+        # the module attribute that the function actually resolves.
+        monkeypatch.setattr(
+            "boa_forecaster.validation.pickle.PicklingError",
+            pickle.PicklingError,
+            raising=False,
+        )
+
+        with caplog.at_level("WARNING", logger="boa_forecaster.validation"):
+            result = walk_forward_validation(
+                long_series,
+                _picklable_naive_model,
+                n_folds=3,
+                test_size=6,
+                min_train_size=24,
+                n_jobs=2,
+            )
+        assert len(result) == 3
+        assert list(result["fold"]) == [1, 2, 3]
+        # Warning was emitted noting the fallback.
+        assert any(
+            "falling back to sequential" in rec.message for rec in caplog.records
+        )
 
 
 # ---------------------------------------------------------------------------
