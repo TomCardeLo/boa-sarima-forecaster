@@ -629,9 +629,21 @@ jupyter notebook notebooks/demo.ipynb
 Preset packs bundle domain constants + convenience wrappers for common problems without polluting core. First pack: air quality.
 
 ```python
-from boa_forecaster.presets.air_quality import hit_rate_ica, ICA_EDGES_PM25_CO2017
+import numpy as np
+from boa_forecaster.presets.air_quality import hit_rate_ica, hit_rate_ica_weighted
+
+# PM2.5 observations (µg/m³) and model predictions
+y_true = np.array([8.0, 25.0, 42.0, 180.0, 310.0])
+y_pred = np.array([10.0, 30.0, 40.0, 160.0, 280.0])
+
+# Fraction landing in the correct ICA bucket (Colombia Res. 2254/2017)
 score = hit_rate_ica(y_true, y_pred, standard="CO2017")
+
+# Same, but misses in high-risk buckets ("Peligrosa") penalise more heavily
+weighted_score = hit_rate_ica_weighted(y_true, y_pred, standard="CO2017")
 ```
+
+Both helpers also accept `standard="USAQI"` for the US EPA AQI breakpoints. Pass a custom `weights` list to `hit_rate_ica_weighted` to override the default health-risk weighting.
 
 Future packs (`presets/demand.py`, `presets/energy.py`, `presets/finance.py`) will follow the same shape — constants + thin wrappers leaning on core `metrics.py`.
 
