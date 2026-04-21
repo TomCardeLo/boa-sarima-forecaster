@@ -487,6 +487,51 @@ result = optimize_model(
 
 ---
 
+## Bucketed metrics
+
+For tiered forecasting contexts — demand categories, inventory risk classes,
+severity bands, or any classification where landing in the correct bucket
+matters more than absolute accuracy — `boa_forecaster` exposes two generic
+bucketed metrics: `hit_rate_weighted` and `f1_by_bucket`.
+
+`hit_rate_weighted` extends the plain `hit_rate` by assigning a per-bucket
+importance weight.  A prediction that misses a high-stakes tier (e.g. a
+high-demand SKU that could cause a stockout) is penalised more heavily than
+a miss in a low-stakes tier, so the final score reflects business impact
+rather than treating all misses equally.
+
+`f1_by_bucket` computes a one-vs-rest F1 score for each bucket, giving
+independent visibility into precision and recall by tier.  This is useful
+when different business decisions are triggered by different tier errors — for
+example, over-forecasting in the low tier may be harmless while
+under-forecasting in the high tier is critical.
+
+```python
+import numpy as np
+from boa_forecaster.metrics import hit_rate_weighted, f1_by_bucket
+
+# Demand tiers: low (<100 units/week), medium (100–500), high (>500)
+edges = [100, 500]
+weights = [1, 2, 5]  # stockout risk grows with tier
+
+y_true = np.array([50.0, 200.0, 600.0, 80.0, 520.0])
+y_pred = np.array([60.0, 210.0, 400.0, 75.0, 510.0])  # high-tier miss on index 2
+
+score = hit_rate_weighted(y_true, y_pred, edges=edges, weights=weights)
+by_tier = f1_by_bucket(y_true, y_pred, edges=edges, labels=["low", "med", "high"])
+
+print(f"Weighted hit-rate: {score:.3f}")
+print(f"F1 by tier:        {by_tier}")
+```
+
+Both functions use the same `edges` convention as `numpy.digitize`: an array
+of monotonically increasing boundaries that partition the value range into
+`len(edges) + 1` contiguous buckets.  `f1_by_bucket` falls back to a
+pure-NumPy implementation when scikit-learn is not installed, so neither
+function adds a new hard dependency.
+
+---
+
 ## Validation & Benchmarks
 
 Walk-forward (expanding window) cross-validation evaluates models on true
