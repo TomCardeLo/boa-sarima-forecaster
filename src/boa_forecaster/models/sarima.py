@@ -26,7 +26,7 @@ from boa_forecaster.config import (
     DEFAULT_SEASONAL_PERIOD,
     OPTIMIZER_PENALTY,
 )
-from boa_forecaster.models.base import IntParam, suggest_from_space
+from boa_forecaster.models.base import CategoricalParam, IntParam, suggest_from_space
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,21 @@ class SARIMASpec:
         Q_range: tuple[int, int] = DEFAULT_Q_SEASONAL_RANGE,
         m: int = DEFAULT_SEASONAL_PERIOD,
         forecast_horizon: int = 12,
+        seasonal_period_candidates: list[int] | None = None,
     ) -> None:
+        if seasonal_period_candidates is not None:
+            if len(seasonal_period_candidates) == 0:
+                raise ValueError(
+                    "seasonal_period_candidates must not be empty; "
+                    "pass None to keep seasonal_period fixed."
+                )
+            if not all(
+                isinstance(c, int) and c > 0 for c in seasonal_period_candidates
+            ):
+                raise ValueError(
+                    "seasonal_period_candidates must be a list of positive integers; "
+                    f"got {seasonal_period_candidates!r}."
+                )
         self.p_range = p_range
         self.d_range = d_range
         self.q_range = q_range
@@ -69,13 +83,19 @@ class SARIMASpec:
         self.Q_range = Q_range
         self.m = m
         self.forecast_horizon = forecast_horizon
+        self.seasonal_period_candidates = seasonal_period_candidates
 
     # ── ModelSpec properties ──────────────────────────────────────────────────
 
     @property
     def search_space(self) -> dict:
-        """One ``IntParam`` per SARIMA order (p, d, q, P, D, Q)."""
-        return {
+        """One ``IntParam`` per SARIMA order (p, d, q, P, D, Q).
+
+        When ``seasonal_period_candidates`` was supplied at construction time,
+        an additional ``CategoricalParam`` named ``"seasonal_period"`` is
+        appended so Optuna can tune the seasonal period alongside the orders.
+        """
+        space: dict = {
             "p": IntParam(self.p_range[0], self.p_range[1]),
             "d": IntParam(self.d_range[0], self.d_range[1]),
             "q": IntParam(self.q_range[0], self.q_range[1]),
@@ -83,6 +103,11 @@ class SARIMASpec:
             "D": IntParam(self.D_range[0], self.D_range[1]),
             "Q": IntParam(self.Q_range[0], self.Q_range[1]),
         }
+        if self.seasonal_period_candidates is not None:
+            space["seasonal_period"] = CategoricalParam(
+                choices=list(self.seasonal_period_candidates)
+            )
+        return space
 
     @property
     def warm_starts(self) -> list[dict]:
@@ -139,6 +164,9 @@ class SARIMASpec:
         """
         p, d, q = params["p"], params["d"], params["q"]
         P, D, Q = params["P"], params["D"], params["Q"]
+        # Resolve seasonal period: Optuna-sampled value takes precedence over
+        # the fixed self.m fallback (back-compat: default spec omits this param).
+        m = params.get("seasonal_period", self.m)
 
         if (p + q) > self.MAX_NON_SEASONAL_ORDER or (P + Q) > self.MAX_SEASONAL_ORDER:
             return OPTIMIZER_PENALTY
@@ -148,7 +176,7 @@ class SARIMASpec:
             model = SARIMAX(
                 data,
                 order=(p, d, q),
-                seasonal_order=(P, D, Q, self.m),
+                seasonal_order=(P, D, Q, m),
                 enforce_stationarity=False,
                 enforce_invertibility=False,
             )
@@ -203,6 +231,59 @@ class SARIMASpec:
             return fit.get_forecast(steps=horizon).predicted_mean
 
         return forecaster
+
+    # ── Frequency-aware factory ───────────────────────────────────────────────
+
+    @classmethod
+    def for_frequency(cls, freq: str, **overrides: object) -> SARIMASpec:
+        """Return a ``SARIMASpec`` with sensible seasonal defaults for *freq*.
+
+        Mirrors ``FeatureConfig.for_frequency`` in shape and supported aliases.
+
+        Presets
+        -------
+        - ``"MS"`` / ``"M"`` (monthly) → ``m=12``, fixed.
+        - ``"W"``  (weekly)            → ``m=52``, fixed.
+        - ``"D"``  (daily)             → ``m=7``,  fixed.
+        - ``"h"``  / ``"H"`` (hourly)  → ``seasonal_period_candidates=[24, 168]``
+          so Optuna tunes the seasonal period from {24, 168}.  ``self.m`` is
+          set to 24 as a vestigial fallback; the sampled param always wins.
+
+        Any constructor kwarg can be overridden via ``**overrides`` (e.g.
+        ``SARIMASpec.for_frequency("MS", p_range=(0, 3))``).
+
+        Args:
+            freq: Pandas DateOffset alias — ``"MS"``, ``"M"``, ``"W"``,
+                ``"D"``, ``"h"``, or ``"H"``.
+            **overrides: Constructor keyword arguments that override the
+                frequency-derived defaults.
+
+        Returns:
+            A new ``SARIMASpec`` instance.
+
+        Raises:
+            ValueError: If *freq* is not a supported alias.
+        """
+        _SUPPORTED = ("MS", "M", "W", "D", "h", "H")
+        if freq not in _SUPPORTED:
+            raise ValueError(
+                f"Unknown frequency {freq!r}; supported: {', '.join(_SUPPORTED)}"
+            )
+
+        if freq in ("MS", "M"):
+            defaults: dict[str, object] = {"m": 12}
+        elif freq == "W":
+            defaults = {"m": 52}
+        elif freq == "D":
+            defaults = {"m": 7}
+        else:  # "h" or "H"
+            defaults = {
+                "m": 24,  # vestigial fallback; sampled param wins in evaluate()
+                "seasonal_period_candidates": [24, 168],
+            }
+
+        defaults.update(overrides)
+        return cls(**defaults)  # type: ignore[arg-type]
 
 
 # ── Free functions (backwards compatibility) ──────────────────────────────────
