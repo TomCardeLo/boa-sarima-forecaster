@@ -93,6 +93,42 @@ def test_weighted_penalizes_dangerous_bucket() -> None:
     ), f"Expected peligrosa_score ({score_peligrosa:.4f}) < buena_score ({score_buena:.4f})"
 
 
+def test_hit_rate_ica_weighted_sub_zero_predictions() -> None:
+    """Sub-zero y_pred lands in bucket 0; weights come from buckets_true, not pred.
+
+    With ``y_true=[300, 5]``, ``y_pred=[-5, -1]``:
+      buckets_true = [6, 1] ("Peligrosa", "Buena")
+      buckets_pred = [0, 0] (both below 0 — impossible in reality)
+      hits         = [0, 0]       (both miss)
+      obs_weights  = [10, 1]      (weights from buckets_true)
+      result       = dot([10,1], [0,0]) / (10+1) = 0.0
+
+    Pins behaviour against future changes to how ``hit_rate_weighted``
+    handles the weight=0 bucket 0.  Model artifacts that produce negative
+    predictions still register as misses — they just don't accrue extra
+    weight, because the weight is sourced from the (impossible) bucket of
+    the *truth*, not the prediction.
+    """
+    y_true = np.array([300.0, 5.0])
+    y_pred = np.array([-5.0, -1.0])
+
+    result = hit_rate_ica_weighted(y_true, y_pred, standard="CO2017")
+
+    assert result == pytest.approx(0.0)
+
+
+def test_hit_rate_ica_rejects_invalid_standard() -> None:
+    """Typo in ``standard`` must raise ValueError, not silently fall through."""
+    y_true = np.array([5.0, 40.0])
+    y_pred = np.array([5.0, 40.0])
+
+    with pytest.raises(ValueError, match="standard must be one of"):
+        hit_rate_ica(y_true, y_pred, standard="USEPA")  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="standard must be one of"):
+        hit_rate_ica_weighted(y_true, y_pred, standard="USEPA")  # type: ignore[arg-type]
+
+
 def test_constants_shape() -> None:
     """Verify that constants have the expected shapes and that edges are strictly monotonic."""
     assert len(ICA_EDGES_PM25_CO2017) == 7

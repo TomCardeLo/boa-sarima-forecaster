@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from typing import Literal
 
-from numpy.typing import ArrayLike
+import numpy as np
 
 from boa_forecaster.metrics import hit_rate, hit_rate_weighted
 
@@ -29,12 +29,19 @@ ICA_WEIGHTS_HEALTH: list[float] = [0, 1, 1, 2, 3, 5, 10, 10]
   5 → "Muy dañina"           (150–250 µg/m³,weight  5)
   6 → "Peligrosa"            (250–500 µg/m³,weight 10)
   7 → above 500 µg/m³ (extreme / instrument error, weight 10)
+
+The tail plateau (buckets 6 and 7 both weighted 10) treats values above
+500 µg/m³ as equivalent to "Peligrosa" — both already hit the regulatory
+alarm ceiling.  If downstream consumers need to differentiate, pass a
+custom ``weights`` list to :func:`hit_rate_ica_weighted`.
 """
+
+_VALID_STANDARDS = ("CO2017", "USAQI")
 
 
 def hit_rate_ica(
-    y_true: ArrayLike,
-    y_pred: ArrayLike,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
     standard: Literal["CO2017", "USAQI"] = "CO2017",
 ) -> float:
     """ICA PM2.5 hit-rate. Dispatches to core hit_rate with air-quality edges.
@@ -47,14 +54,21 @@ def hit_rate_ica(
 
     Returns:
         Fraction of predictions that fall in the same ICA bucket as the truth.
+
+    Raises:
+        ValueError: If ``standard`` is not ``"CO2017"`` or ``"USAQI"``.
     """
+    if standard not in _VALID_STANDARDS:
+        raise ValueError(
+            f"standard must be one of {_VALID_STANDARDS}, got {standard!r}"
+        )
     edges = ICA_EDGES_PM25_CO2017 if standard == "CO2017" else ICA_EDGES_PM25_USAQI
     return hit_rate(y_true, y_pred, edges)
 
 
 def hit_rate_ica_weighted(
-    y_true: ArrayLike,
-    y_pred: ArrayLike,
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
     standard: Literal["CO2017", "USAQI"] = "CO2017",
     weights: Sequence[float] = ICA_WEIGHTS_HEALTH,
 ) -> float:
@@ -75,6 +89,13 @@ def hit_rate_ica_weighted(
 
     Returns:
         Weighted fraction of predictions in the correct ICA bucket.
+
+    Raises:
+        ValueError: If ``standard`` is not ``"CO2017"`` or ``"USAQI"``.
     """
+    if standard not in _VALID_STANDARDS:
+        raise ValueError(
+            f"standard must be one of {_VALID_STANDARDS}, got {standard!r}"
+        )
     edges = ICA_EDGES_PM25_CO2017 if standard == "CO2017" else ICA_EDGES_PM25_USAQI
     return hit_rate_weighted(y_true, y_pred, edges, weights=list(weights))
