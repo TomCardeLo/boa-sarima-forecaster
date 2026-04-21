@@ -51,6 +51,7 @@ class XGBoostSpec(BaseMLSpec):
     """
 
     name: str = "xgboost"
+    uses_early_stopping: bool = True
 
     def __init__(
         self,
