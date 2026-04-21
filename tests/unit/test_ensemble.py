@@ -9,10 +9,14 @@ outputs.  These tests cover:
 4. The ``inverse_cv_loss`` weighting beats the worse of two members on a
    synthetic series.
 5. Explicit-weight construction and empty-members guard.
+6. H9a — ``inverse_cv_loss`` warns when mixing early-stopping and full-fold
+   members (XGBoostSpec + SARIMASpec); no warning for homogeneous members or
+   ``strategy="equal"``.
 """
 
 from __future__ import annotations
 
+import warnings
 from typing import Callable
 
 import numpy as np
@@ -272,3 +276,81 @@ def test_needs_features_true_when_ml_member_present() -> None:
 
     mixed = EnsembleSpec([SARIMASpec(), RandomForestSpec()], weighting="equal")
     assert mixed.needs_features is True
+
+
+# ── H9a: early-stopping safety warning ───────────────────────────────────────
+
+
+@pytest.mark.requires_xgboost
+def test_inverse_cv_loss_warns_when_mixing_early_stopping_and_full_fold() -> None:
+    """``inverse_cv_loss`` should warn when mixing early-stopping (XGBoost) and
+    full-fold (SARIMA) members — their CV losses are not directly comparable."""
+    pytest.importorskip("xgboost")
+    from boa_forecaster.models.sarima import SARIMASpec
+    from boa_forecaster.models.xgboost import XGBoostSpec
+
+    sarima = SARIMASpec()
+    xgb = XGBoostSpec()
+    ens = EnsembleSpec(
+        [sarima, xgb],
+        weighting="inverse_cv_loss",
+        member_scores={"sarima": 0.3, "xgboost": 0.2},
+    )
+
+    with pytest.warns(UserWarning, match="mixes early-stopping"):
+        ens._resolve_weights()
+
+
+@pytest.mark.requires_xgboost
+def test_inverse_cv_loss_no_warning_for_homogeneous_xgb() -> None:
+    """No warning when all members are early-stopping (all XGBoost)."""
+    pytest.importorskip("xgboost")
+    from boa_forecaster.models.xgboost import XGBoostSpec
+
+    xgb1 = XGBoostSpec()
+    xgb2 = XGBoostSpec()
+    xgb2.name = "xgboost_b"
+    ens = EnsembleSpec(
+        [xgb1, xgb2],
+        weighting="inverse_cv_loss",
+        member_scores={"xgboost": 0.3, "xgboost_b": 0.2},
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        ens._resolve_weights()  # must not raise
+
+
+@pytest.mark.requires_xgboost
+def test_inverse_cv_loss_no_warning_for_homogeneous_sarima() -> None:
+    """No warning when all members are full-fold (all SARIMA)."""
+    from boa_forecaster.models.sarima import SARIMASpec
+
+    sarima1 = SARIMASpec()
+    sarima2 = SARIMASpec()
+    sarima2.name = "sarima_b"
+    ens = EnsembleSpec(
+        [sarima1, sarima2],
+        weighting="inverse_cv_loss",
+        member_scores={"sarima": 0.3, "sarima_b": 0.4},
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        ens._resolve_weights()  # must not raise
+
+
+@pytest.mark.requires_xgboost
+def test_no_warning_under_equal_strategy() -> None:
+    """``strategy='equal'`` must never emit the early-stopping warning."""
+    pytest.importorskip("xgboost")
+    from boa_forecaster.models.sarima import SARIMASpec
+    from boa_forecaster.models.xgboost import XGBoostSpec
+
+    sarima = SARIMASpec()
+    xgb = XGBoostSpec()
+    ens = EnsembleSpec([sarima, xgb], weighting="equal")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        ens._resolve_weights()  # must not raise

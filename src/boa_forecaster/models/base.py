@@ -190,6 +190,7 @@ class ModelSpec(Protocol):
 
     name: str
     needs_features: bool
+    uses_early_stopping: bool
 
     @property
     def search_space(self) -> dict[str, SearchSpaceParam]: ...

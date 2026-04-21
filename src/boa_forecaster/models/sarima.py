@@ -46,6 +46,7 @@ class SARIMASpec:
 
     name = "sarima"
     needs_features = False
+    uses_early_stopping = False
 
     MAX_NON_SEASONAL_ORDER: int = 4  # max(p + q) complexity constraint
     MAX_SEASONAL_ORDER: int = 3  # max(P + Q) seasonal complexity constraint

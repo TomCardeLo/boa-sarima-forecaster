@@ -59,6 +59,7 @@ class LightGBMSpec(BaseMLSpec):
     """
 
     name: str = "lightgbm"
+    uses_early_stopping: bool = True
 
     def __init__(
         self,

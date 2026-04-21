@@ -58,6 +58,7 @@ class BaseMLSpec:
     """
 
     needs_features: bool = True
+    uses_early_stopping: bool = False
 
     def __init__(
         self,

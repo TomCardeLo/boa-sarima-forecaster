@@ -29,6 +29,7 @@ class _ValidSpec:
 
     name = "test_model"
     needs_features = False
+    uses_early_stopping = False
 
     @property
     def search_space(self) -> dict:
