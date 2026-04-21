@@ -262,6 +262,172 @@ def hit_rate(
     return float(np.mean(buckets_true == buckets_pred))
 
 
+def hit_rate_weighted(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    edges: Iterable[float],
+    weights: list[float] | None = None,
+) -> float:
+    """Compute a per-bucket-weighted hit rate.
+
+    Each observation's hit or miss is weighted by the weight assigned to its
+    **true** bucket.  This lets high-stakes tiers (e.g. high-demand or
+    high-risk buckets) contribute more to the final score than low-stakes
+    tiers.
+
+    When *weights* is ``None`` the result is identical to :func:`hit_rate`.
+
+    Formula::
+
+        buckets_true = np.digitize(y_true, edges)
+        buckets_pred = np.digitize(y_pred, edges)
+        weighted_hr  = sum(weights[b_i] * (b_true_i == b_pred_i))
+                       / sum(weights[b_i])
+
+    where ``b_i`` is the true bucket index of observation *i*.
+
+    Args:
+        y_true: Array of observed values.  Shape ``(n,)``.
+        y_pred: Array of predicted values.  Shape ``(n,)``.
+        edges: Monotonically increasing sequence of bucket boundaries passed
+            unchanged to :func:`numpy.digitize`.
+        weights: Per-bucket weights.  Must have length ``len(edges) + 1``
+            (one weight per bucket in the range ``[0, len(edges)]`` that
+            :func:`numpy.digitize` can return).  All weights must be
+            non-negative and their sum must be positive.  Pass ``None`` to
+            use uniform weights (equivalent to :func:`hit_rate`).
+
+    Returns:
+        Weighted hit-rate in ``[0.0, 1.0]`` (higher is better).
+
+    Raises:
+        ValueError: If ``len(weights) != len(edges) + 1``.
+        ValueError: If any weight is negative.
+        ValueError: If ``sum(weights) == 0``.
+
+    Example:
+        >>> import numpy as np
+        >>> # Demand tiers: low (<100 units), medium (100–500), high (>500)
+        >>> edges = [100.0, 500.0]
+        >>> weights = [1.0, 2.0, 5.0]  # stockout risk grows with tier
+        >>> y_true = np.array([50.0, 200.0, 600.0])
+        >>> y_pred = np.array([60.0, 210.0, 400.0])  # high-tier miss
+        >>> hit_rate_weighted(y_true, y_pred, edges, weights=weights)
+        0.5
+    """
+    edge_array = np.asarray(list(edges), dtype=float)
+    n_buckets = len(edge_array) + 1
+
+    if weights is None:
+        return hit_rate(y_true, y_pred, edges)
+
+    w = np.asarray(weights, dtype=float)
+    if len(w) != n_buckets:
+        raise ValueError(
+            f"len(weights) must equal len(edges) + 1 = {n_buckets}, " f"got {len(w)}."
+        )
+    if np.any(w < 0):
+        raise ValueError(
+            "All weights must be non-negative; got at least one negative weight."
+        )
+    if w.sum() == 0:
+        raise ValueError("sum(weights) must be positive; got all-zero weights.")
+
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    buckets_true = np.digitize(y_true, edge_array)
+    buckets_pred = np.digitize(y_pred, edge_array)
+    obs_weights = w[buckets_true]
+    hits = (buckets_true == buckets_pred).astype(float)
+    return float(np.dot(obs_weights, hits) / obs_weights.sum())
+
+
+def f1_by_bucket(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    edges: Iterable[float],
+    labels: list[str] | None = None,
+) -> dict[str, float]:
+    """Compute a per-bucket F1 score (one-vs-rest) for each bucket category.
+
+    Treats each bucket as the positive class in a one-vs-rest binary
+    classification and computes the F1 score for that class.  Buckets with
+    no support (no true-positive observations) receive F1 = 0.0 by
+    convention.
+
+    Uses scikit-learn's ``f1_score`` when available; falls back to a
+    pure-NumPy implementation otherwise, so sklearn is **not** a hard
+    dependency.
+
+    Args:
+        y_true: Array of observed values.  Shape ``(n,)``.
+        y_pred: Array of predicted values.  Shape ``(n,)``.
+        edges: Monotonically increasing sequence of bucket boundaries passed
+            unchanged to :func:`numpy.digitize`.
+        labels: Optional list of human-readable names for each bucket.  Must
+            have length ``len(edges) + 1``.  When ``None`` the keys default
+            to ``"bucket_0"``, ``"bucket_1"``, …
+
+    Returns:
+        Dict mapping bucket name → F1 score in ``[0.0, 1.0]``.
+        Length is always ``len(edges) + 1``.
+
+    Raises:
+        ValueError: If ``len(labels) != len(edges) + 1``.
+
+    Example:
+        >>> import numpy as np
+        >>> # Demand tiers: low (<100 units), medium (100–500), high (>500)
+        >>> edges = [100.0, 500.0]
+        >>> y_true = np.array([50.0, 200.0, 600.0, 60.0])
+        >>> y_pred = np.array([60.0, 210.0, 400.0, 55.0])
+        >>> f1_by_bucket(y_true, y_pred, edges, labels=["low", "med", "high"])
+        {'low': 1.0, 'med': 1.0, 'high': 0.0}
+    """
+    edge_array = np.asarray(list(edges), dtype=float)
+    n_buckets = len(edge_array) + 1
+
+    if labels is not None:
+        if len(labels) != n_buckets:
+            raise ValueError(
+                f"len(labels) must equal len(edges) + 1 = {n_buckets}, "
+                f"got {len(labels)}."
+            )
+        bucket_names = list(labels)
+    else:
+        bucket_names = [f"bucket_{i}" for i in range(n_buckets)]
+
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    bt = np.digitize(y_true, edge_array)
+    bp = np.digitize(y_pred, edge_array)
+
+    # Prefer sklearn when present (handles edge cases robustly), fall back to
+    # vectorised NumPy otherwise — no new hard dependency introduced.
+    try:
+        from sklearn.metrics import f1_score as _sk_f1
+
+        all_labels = list(range(n_buckets))
+        scores = _sk_f1(bt, bp, labels=all_labels, average=None, zero_division=0.0)
+        return {bucket_names[i]: float(scores[i]) for i in range(n_buckets)}
+    except ImportError:
+        pass
+
+    result: dict[str, float] = {}
+    for i, name in enumerate(bucket_names):
+        tp = float(np.sum((bt == i) & (bp == i)))
+        fp = float(np.sum((bt != i) & (bp == i)))
+        fn = float(np.sum((bt == i) & (bp != i)))
+        denom_p = tp + fp
+        denom_r = tp + fn
+        precision = tp / denom_p if denom_p > 0 else 0.0
+        recall = tp / denom_r if denom_r > 0 else 0.0
+        denom_f1 = precision + recall
+        f1 = 2.0 * precision * recall / denom_f1 if denom_f1 > 0 else 0.0
+        result[name] = f1
+    return result
+
+
 # Registry mapping metric names (as used in config.yaml) to their callables.
 # Extend this dict to expose additional metrics to the configuration layer.
 METRIC_REGISTRY: dict[str, Callable[..., float]] = {
@@ -271,6 +437,14 @@ METRIC_REGISTRY: dict[str, Callable[..., float]] = {
     "rmse": rmse,
     "mape": mape,
     "hit_rate": hit_rate,
+    "hit_rate_weighted": hit_rate_weighted,
+}
+
+# Registry for metrics that return a dict rather than a scalar float.
+# These cannot be used inside build_combined_metric (which sums weighted floats)
+# but are accessible for reporting and analysis via direct call or this registry.
+METRIC_DICT_REGISTRY: dict[str, Callable[..., dict]] = {
+    "f1_by_bucket": f1_by_bucket,
 }
 
 
