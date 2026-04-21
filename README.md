@@ -624,6 +624,19 @@ jupyter notebook notebooks/demo.ipynb
 
 ---
 
+### Presets
+
+Preset packs bundle domain constants + convenience wrappers for common problems without polluting core. First pack: air quality.
+
+```python
+from boa_forecaster.presets.air_quality import hit_rate_ica, ICA_EDGES_PM25_CO2017
+score = hit_rate_ica(y_true, y_pred, standard="CO2017")
+```
+
+Future packs (`presets/demand.py`, `presets/energy.py`, `presets/finance.py`) will follow the same shape — constants + thin wrappers leaning on core `metrics.py`.
+
+---
+
 ## Backward Compatibility
 
 The `sarima_bayes` package remains fully functional in v2.0 as a **deprecated
