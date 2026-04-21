@@ -454,6 +454,22 @@ output:
 | `"h"` | Hourly | `24` or `168` |
 | `"QS"` | Quarterly | `4` |
 
+### SARIMA hourly seasonality
+
+For hourly data, `seasonal_period` can be tuned automatically by Optuna between
+24 (daily cycle) and 168 (weekly cycle) using `SARIMASpec.for_frequency`:
+
+```python
+from boa_forecaster import SARIMASpec
+
+spec = SARIMASpec.for_frequency("h")  # seasonal_period tuneable over [24, 168]
+result = optimize_model(series, spec, n_trials=30)
+```
+
+Pass `seasonal_period_candidates` directly for custom candidate sets, e.g.
+`SARIMASpec(seasonal_period_candidates=[24, 48, 168])`.  The default
+`SARIMASpec()` (monthly, `m=12`) is unchanged.
+
 ---
 
 ## Configurable Metric
