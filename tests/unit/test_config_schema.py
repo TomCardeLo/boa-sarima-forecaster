@@ -1,12 +1,14 @@
 """Tests for ``boa_forecaster.config_schema.BoaConfig``.
 
-Covers three things:
+Covers five things:
 
 1. Round-trip: ``config.example.yaml`` loads without error.
 2. Default coverage: nested section defaults kick in when omitted.
 3. Strict-mode forward-compat: a ``StrictBoaConfig`` subclass that flips
    ``extra="forbid"`` rejects typo'd keys with ``ValidationError``.  This
    exercises the code path that v3.0 (Z4 roadmap) will default to.
+4. Literal / Field validators added in H4.
+5. ``BoaConfig.from_dict`` classmethod + ``--strict`` plumbing.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from boa_forecaster.config_schema import (
     BoaConfig,
     DataConfig,
     FeaturesConfig,
+    ForecastConfig,
     ModelsConfig,
     OptimizationConfig,
     StandardizationConfig,
@@ -119,3 +122,144 @@ def test_default_mode_accepts_typoed_key_today(tmp_path: Path) -> None:
 
     cfg = BoaConfig.load(cfg_path)
     assert cfg.models.active == "sarima"
+
+
+# ── 4. Literal / Field validators (H4) ────────────────────────────────────────
+
+
+class TestStandardizationLiteralMethod:
+    def test_valid_sigma(self) -> None:
+        cfg = StandardizationConfig(method="sigma")
+        assert cfg.method == "sigma"
+
+    def test_valid_iqr(self) -> None:
+        cfg = StandardizationConfig(method="iqr")
+        assert cfg.method == "iqr"
+
+    def test_invalid_method_raises(self) -> None:
+        with pytest.raises(ValidationError):
+            StandardizationConfig(method="gaussian")
+
+
+class TestStandardizationThresholdField:
+    def test_threshold_zero_fails(self) -> None:
+        with pytest.raises(ValidationError):
+            StandardizationConfig(threshold=0)
+
+    def test_threshold_negative_fails(self) -> None:
+        with pytest.raises(ValidationError):
+            StandardizationConfig(threshold=-1.0)
+
+    def test_threshold_ten_passes(self) -> None:
+        cfg = StandardizationConfig(threshold=10)
+        assert cfg.threshold == pytest.approx(10)
+
+    def test_threshold_eleven_fails(self) -> None:
+        with pytest.raises(ValidationError):
+            StandardizationConfig(threshold=11)
+
+    def test_threshold_positive_passes(self) -> None:
+        cfg = StandardizationConfig(threshold=2.5)
+        assert cfg.threshold == pytest.approx(2.5)
+
+
+class TestDataConfigFreqLiteral:
+    @pytest.mark.parametrize("freq", ["MS", "M", "W", "D", "h", "H"])
+    def test_valid_freq(self, freq: str) -> None:
+        cfg = DataConfig(input_path="foo.xlsx", freq=freq)
+        assert cfg.freq == freq
+
+    def test_invalid_freq_raises(self) -> None:
+        with pytest.raises(ValidationError):
+            DataConfig(input_path="foo.xlsx", freq="monthly")
+
+
+class TestForecastNPeriodsField:
+    def test_zero_fails(self) -> None:
+        with pytest.raises(ValidationError):
+            ForecastConfig(n_periods=0)
+
+    def test_one_passes(self) -> None:
+        cfg = ForecastConfig(n_periods=1)
+        assert cfg.n_periods == 1
+
+    def test_twelve_passes(self) -> None:
+        cfg = ForecastConfig(n_periods=12)
+        assert cfg.n_periods == 12
+
+
+# ── 5. BoaConfig.from_dict and --strict plumbing (H4) ─────────────────────────
+
+
+class TestFromDict:
+    def test_happy_path(self) -> None:
+        data = {"models": {"active": "sarima"}, "forecast": {"n_periods": 6}}
+        cfg = BoaConfig.from_dict(data)
+        assert cfg.models.active == "sarima"
+        assert cfg.forecast.n_periods == 6
+
+    def test_strict_false_accepts_typo(self) -> None:
+        data = {"models": {"active": "sarima"}, "typo_key": 99}
+        cfg = BoaConfig.from_dict(data, strict=False)
+        assert cfg.models.active == "sarima"
+
+    def test_strict_true_rejects_typo(self) -> None:
+        data = {"models": {"active": "sarima"}, "typo_key": 99}
+        with pytest.raises(ValidationError):
+            BoaConfig.from_dict(data, strict=True)
+
+    def test_strict_true_accepts_clean_config(self) -> None:
+        data = {"models": {"active": "sarima"}}
+        cfg = BoaConfig.from_dict(data, strict=True)
+        assert cfg.models.active == "sarima"
+
+
+class TestFromDictStrictNestedTypo:
+    """Strict mode should also catch typos in nested sub-models."""
+
+    def test_nested_typo_raises_under_strict(self) -> None:
+        data = {
+            "models": {"active": "sarima"},
+            "forecast": {"n_periods": 12, "n_perods": 6},  # typo in nested
+        }
+        with pytest.raises(ValidationError):
+            BoaConfig.from_dict(data, strict=True)
+
+    def test_nested_typo_allowed_without_strict(self) -> None:
+        data = {
+            "models": {"active": "sarima"},
+            "forecast": {"n_periods": 12, "n_perods": 6},
+        }
+        cfg = BoaConfig.from_dict(data, strict=False)
+        assert cfg.forecast.n_periods == 12
+
+
+# ── 6. Canary: config.example.yaml round-trips under strict=True ──────────────
+
+
+def test_example_yaml_round_trips_strict() -> None:
+    """config.example.yaml must load cleanly with strict=True."""
+    with EXAMPLE_YAML.open("r", encoding="utf-8") as fh:
+        raw = yaml.safe_load(fh) or {}
+    cfg = BoaConfig.from_dict(raw, strict=True)
+    assert isinstance(cfg.data, DataConfig)
+    assert cfg.models.active == "sarima"
+
+
+# ── 7. CLI --strict plumbing ──────────────────────────────────────────────────
+
+
+def test_cli_strict_flag_plumbing_via_from_dict() -> None:
+    """``BoaConfig.from_dict`` with strict=True raises on a typo'd top-level key.
+
+    This tests the plumbing that the CLI --strict flag exercises, without
+    spawning a subprocess (no data file needed).
+    """
+    dirty = {"models": {"active": "sarima"}, "n_trails": 1}
+    # strict=False → passes (back-compat default, mirrors CLI without --strict)
+    cfg = BoaConfig.from_dict(dirty, strict=False)
+    assert cfg.models.active == "sarima"
+
+    # strict=True → fails (mirrors CLI --strict)
+    with pytest.raises(ValidationError):
+        BoaConfig.from_dict(dirty, strict=True)

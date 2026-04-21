@@ -39,15 +39,25 @@ logger = logging.getLogger(__name__)
 @click.option("--n-folds", type=int, default=3, show_default=True)
 @click.option("--test-size", type=int, default=12, show_default=True)
 @click.option("--min-train-size", type=int, default=24, show_default=True)
+@click.option(
+    "--strict",
+    is_flag=True,
+    default=False,
+    help=(
+        "Load config in strict mode: unknown keys raise ValidationError. "
+        "Default is off for v2.x back-compat."
+    ),
+)
 def validate(
     config_path: str,
     output_dir: str,
     n_folds: int,
     test_size: int,
     min_train_size: int,
+    strict: bool,
 ) -> None:
     """Run walk-forward validation for the active model."""
-    cfg = BoaConfig.load(config_path)
+    cfg = BoaConfig.load(config_path, strict=strict)
     out = ensure_output_dir(output_dir)
 
     series = load_series_from_config(cfg)
