@@ -13,18 +13,21 @@ Example
 >>> cfg.models.active
 'sarima'
 
-Strict-mode (TODO v3.0)
------------------------
-Today ``BoaConfig`` accepts unknown keys (``extra="allow"``) so that legacy
-configs keep loading during the v2.x series.  In v3.0 this flips to
-``extra="forbid"`` per the Z4 roadmap item so typos like ``n_trails`` raise
-``ValidationError`` instead of silently being ignored.
+Strict-mode (opt-in since H4, default in v3.0)
+-----------------------------------------------
+``BoaConfig`` accepts unknown keys (``extra="allow"``) by default so that
+legacy configs keep loading during the v2.x series.  Pass ``strict=True``
+to :meth:`BoaConfig.from_dict` or :meth:`BoaConfig.load`, or use the
+``--strict`` CLI flag, to flip this to ``extra="forbid"`` and catch typos
+like ``n_trails`` at load time instead of silently ignoring them.
+
+In v3.0 ``extra="forbid"`` will become the default (Z4 roadmap).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field
@@ -32,6 +35,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # TODO (v3.0, Z4): change ``extra="allow"`` → ``extra="forbid"`` across every
 # sub-model below so typo'd keys raise ``ValidationError`` at load time.
 _ALLOW_EXTRA: ConfigDict = ConfigDict(extra="allow")
+_FORBID_EXTRA: ConfigDict = ConfigDict(extra="forbid")
 
 
 # ── Sub-configs ───────────────────────────────────────────────────────────────
@@ -47,7 +51,7 @@ class DataConfig(BaseModel):
     skip_rows: int = 2
     date_format: str = "%Y%m"
     end_date: Optional[str] = None
-    freq: str = "MS"
+    freq: Literal["MS", "M", "W", "D", "h", "H"] = "MS"
 
 
 class StandardizationConfig(BaseModel):
@@ -56,7 +60,10 @@ class StandardizationConfig(BaseModel):
     model_config = _ALLOW_EXTRA
 
     window: int = 6
+    # Legacy field — kept for v2.x back-compat. New code should use ``threshold``.
     sigma_threshold: float = 2.5
+    method: Literal["sigma", "iqr"] = "sigma"
+    threshold: float = Field(default=2.5, gt=0, le=10)
 
 
 class OptimizationConfig(BaseModel):
@@ -106,7 +113,7 @@ class ForecastConfig(BaseModel):
 
     model_config = _ALLOW_EXTRA
 
-    n_periods: int = 12
+    n_periods: int = Field(default=12, ge=1)
     alpha: float = 0.05
 
 
@@ -204,11 +211,41 @@ class BoaConfig(BaseModel):
     # ── Loading ───────────────────────────────────────────────────────────────
 
     @classmethod
-    def load(cls, path: Union[str, Path]) -> BoaConfig:
+    def from_dict(cls, data: dict, *, strict: bool = False) -> BoaConfig:
+        """Validate *data* against the schema and return a ``BoaConfig``.
+
+        This is the dict-level primitive that :meth:`load` delegates to.
+
+        Args:
+            data: Raw configuration dictionary (e.g. parsed from YAML).
+            strict: When ``True``, unknown keys at the top level **and** in
+                every nested sub-model raise ``pydantic.ValidationError``
+                immediately.  Defaults to ``False`` (``extra="allow"``,
+                v2.x back-compat).
+
+        Returns:
+            Validated ``BoaConfig`` instance.
+
+        Raises:
+            pydantic.ValidationError: Validation fails (always) or an unknown
+                key is present (only when ``strict=True``).
+        """
+        if not strict:
+            return cls.model_validate(data)
+
+        # strict=True — delegate to the pre-built strict variant defined at
+        # module level below.  Every sub-model in that hierarchy has
+        # ``extra="forbid"`` so typos at any nesting level raise immediately.
+        return _StrictBoaConfig.model_validate(data)  # type: ignore[return-value]
+
+    @classmethod
+    def load(cls, path: Union[str, Path], *, strict: bool = False) -> BoaConfig:
         """Read *path* as YAML and validate it against this schema.
 
         Args:
             path: Filesystem path to a ``config.yaml`` file.
+            strict: Forwarded to :meth:`from_dict`; when ``True`` unknown keys
+                raise ``pydantic.ValidationError``.
 
         Returns:
             Validated ``BoaConfig`` instance.
@@ -222,4 +259,87 @@ class BoaConfig(BaseModel):
             raise FileNotFoundError(f"Config file not found: {p}")
         with p.open("r", encoding="utf-8") as fh:
             raw = yaml.safe_load(fh) or {}
-        return cls.model_validate(raw)
+        return cls.from_dict(raw, strict=strict)
+
+
+# ── Strict-mode variants (extra="forbid" on every sub-model) ─────────────────
+# Used by ``BoaConfig.from_dict(..., strict=True)`` and the CLI ``--strict``
+# flag.  These are *private* module-level classes, not part of the public API.
+# Each mirrors its lenient counterpart but overrides ``model_config`` to forbid
+# extra keys, surfacing typos at load time.
+
+
+class _StrictDataConfig(DataConfig):
+    model_config = _FORBID_EXTRA
+
+
+class _StrictStandardizationConfig(StandardizationConfig):
+    model_config = _FORBID_EXTRA
+
+
+class _StrictOptimizationConfig(OptimizationConfig):
+    model_config = _FORBID_EXTRA
+
+
+class _StrictMetricComponent(MetricComponent):
+    model_config = _FORBID_EXTRA
+
+
+class _StrictMetricsConfig(MetricsConfig):
+    model_config = _FORBID_EXTRA
+
+
+class _StrictForecastConfig(ForecastConfig):
+    model_config = _FORBID_EXTRA
+
+
+class _StrictOutputConfig(OutputConfig):
+    model_config = _FORBID_EXTRA
+
+
+class _StrictLoggingConfig(LoggingConfig):
+    model_config = _FORBID_EXTRA
+
+
+class _StrictModelEntry(ModelEntry):
+    model_config = _FORBID_EXTRA
+
+
+class _StrictModelsConfig(ModelsConfig):
+    model_config = _FORBID_EXTRA
+
+
+class _StrictFeaturesConfig(FeaturesConfig):
+    model_config = _FORBID_EXTRA
+
+
+class _StrictBoaConfig(BoaConfig):
+    """Private strict variant of ``BoaConfig`` used by ``from_dict(strict=True)``."""
+
+    model_config = _FORBID_EXTRA
+
+    data: Optional[_StrictDataConfig] = None  # type: ignore[assignment]
+    standardization: _StrictStandardizationConfig = Field(  # type: ignore[assignment]
+        default_factory=_StrictStandardizationConfig
+    )
+    optimization: _StrictOptimizationConfig = Field(  # type: ignore[assignment]
+        default_factory=_StrictOptimizationConfig
+    )
+    metrics: _StrictMetricsConfig = Field(  # type: ignore[assignment]
+        default_factory=_StrictMetricsConfig
+    )
+    forecast: _StrictForecastConfig = Field(  # type: ignore[assignment]
+        default_factory=_StrictForecastConfig
+    )
+    output: _StrictOutputConfig = Field(  # type: ignore[assignment]
+        default_factory=_StrictOutputConfig
+    )
+    logging: _StrictLoggingConfig = Field(  # type: ignore[assignment]
+        default_factory=_StrictLoggingConfig
+    )
+    models: _StrictModelsConfig = Field(  # type: ignore[assignment]
+        default_factory=_StrictModelsConfig
+    )
+    features: _StrictFeaturesConfig = Field(  # type: ignore[assignment]
+        default_factory=_StrictFeaturesConfig
+    )
