@@ -50,6 +50,9 @@ xgboost = [
 lightgbm = [
     "lightgbm>=4.0",
 ]
+prophet = [
+    "prophet>=1.1",
+]
 ml = [
     "scikit-learn>=1.3",
     "xgboost>=2.0",
@@ -59,6 +62,7 @@ all = [
     "scikit-learn>=1.3",
     "xgboost>=2.0",
     "lightgbm>=4.0",
+    "prophet>=1.1",
     "matplotlib>=3.7",
     "jupyter>=1.0",
     "ipykernel>=6.0",
@@ -95,6 +99,7 @@ markers = [
     "requires_sklearn: tests that need scikit-learn installed",
     "requires_xgboost: tests that need xgboost installed",
     "requires_lightgbm: tests that need lightgbm installed",
+    "requires_prophet: tests that need prophet installed",
     "integration: multi-model end-to-end tests",
     "perf: performance regression benchmarks (pytest-benchmark); skipped unless explicitly run",
 ]
