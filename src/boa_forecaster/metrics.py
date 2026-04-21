@@ -313,7 +313,7 @@ def hit_rate_weighted(
         >>> y_true = np.array([50.0, 200.0, 600.0])
         >>> y_pred = np.array([60.0, 210.0, 400.0])  # high-tier miss
         >>> hit_rate_weighted(y_true, y_pred, edges, weights=weights)
-        0.5
+        0.375
     """
     edge_array = np.asarray(list(edges), dtype=float)
     n_buckets = len(edge_array) + 1
@@ -324,7 +324,7 @@ def hit_rate_weighted(
     w = np.asarray(weights, dtype=float)
     if len(w) != n_buckets:
         raise ValueError(
-            f"len(weights) must equal len(edges) + 1 = {n_buckets}, " f"got {len(w)}."
+            f"len(weights) must equal len(edges) + 1 = {n_buckets}, got {len(w)}."
         )
     if np.any(w < 0):
         raise ValueError(
