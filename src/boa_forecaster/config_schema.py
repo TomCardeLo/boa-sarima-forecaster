@@ -29,8 +29,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal, Optional, Union
 
+import pandas as pd
 import yaml  # type: ignore[import-untyped]
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 # TODO (v3.0, Z4): change ``extra="allow"`` → ``extra="forbid"`` across every
 # sub-model below so typo'd keys raise ``ValidationError`` at load time.
@@ -51,19 +52,52 @@ class DataConfig(BaseModel):
     skip_rows: int = 2
     date_format: str = "%Y%m"
     end_date: Optional[str] = None
-    freq: Literal["MS", "M", "W", "D", "h", "H"] = "MS"
+    freq: str = "MS"
+
+    @field_validator("freq")
+    @classmethod
+    def _freq_must_be_pandas_alias(cls, v: str) -> str:
+        """Accept any alias ``pd.tseries.frequencies.to_offset`` recognises.
+
+        The previous ``Literal`` whitelist (MS, M, W, D, h, H) rejected
+        legitimate pandas aliases like ``"15min"``, ``"Q"``, ``"B"``, and
+        ``"7D"``.  Delegating to pandas keeps us in lock-step with whatever
+        aliases the underlying offset registry supports.
+        """
+        try:
+            pd.tseries.frequencies.to_offset(v)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"freq={v!r} is not a valid pandas offset alias") from exc
+        return v
 
 
 class StandardizationConfig(BaseModel):
-    """Outlier-clipping settings (matches the ``standardization:`` block)."""
+    """Outlier-clipping settings (matches the ``standardization:`` block).
 
-    model_config = _ALLOW_EXTRA
+    ``threshold`` and ``sigma_threshold`` are the **same** field under two
+    names — pass either in YAML/dict and both attributes will read back the
+    same value.  ``sigma_threshold`` is the v1.x name preserved for
+    back-compat; new code should write ``threshold``.
+    """
+
+    model_config = ConfigDict(
+        extra="allow",
+        populate_by_name=True,
+    )
 
     window: int = 6
-    # Legacy field — kept for v2.x back-compat. New code should use ``threshold``.
-    sigma_threshold: float = 2.5
     method: Literal["sigma", "iqr"] = "sigma"
-    threshold: float = Field(default=2.5, gt=0, le=10)
+    threshold: float = Field(
+        default=2.5,
+        gt=0,
+        le=10,
+        validation_alias=AliasChoices("threshold", "sigma_threshold"),
+    )
+
+    @property
+    def sigma_threshold(self) -> float:
+        """Legacy alias for :attr:`threshold` (v1.x name)."""
+        return self.threshold
 
 
 class OptimizationConfig(BaseModel):
@@ -113,7 +147,7 @@ class ForecastConfig(BaseModel):
 
     model_config = _ALLOW_EXTRA
 
-    n_periods: int = Field(default=12, ge=1)
+    n_periods: int = Field(default=12, ge=1, le=10_000)
     alpha: float = 0.05
 
 
@@ -138,9 +172,9 @@ class ModelEntry(BaseModel):
     """Generic per-model entry.
 
     Every entry carries at least ``enabled`` and an opaque ``search_space``
-    dict; model-specific keys (``seasonal_period``, ``forecast_horizon``,
-    ``constraints``, ``warm_starts``, …) live under ``extra`` so the schema
-    does not have to enumerate every model's parameters.
+    dict.  Commonly-used model-specific keys are declared explicitly so they
+    pass ``strict=True`` validation; less-common keys still flow through
+    ``extra="allow"`` in the lenient variant.
     """
 
     model_config = _ALLOW_EXTRA
@@ -148,6 +182,12 @@ class ModelEntry(BaseModel):
     enabled: bool = True
     search_space: dict[str, Any] = Field(default_factory=dict)
     warm_starts: list[dict[str, Any]] = Field(default_factory=list)
+    constraints: Optional[dict[str, Any]] = None
+    # SARIMA-specific (ignored by other models)
+    seasonal_period: Optional[int] = None
+    # ML-model specific (ignored by SARIMA)
+    forecast_horizon: Optional[int] = None
+    early_stopping_rounds: Optional[int] = None
 
 
 class ModelsConfig(BaseModel):
@@ -288,6 +328,16 @@ class _StrictMetricComponent(MetricComponent):
 class _StrictMetricsConfig(MetricsConfig):
     model_config = _FORBID_EXTRA
 
+    # Retype inherited field so strict mode cascades into each component.
+    # Pydantic v2 does not rewalk inherited field annotations when a subclass
+    # only overrides ``model_config``; the nested type must be restated here.
+    components: list[_StrictMetricComponent] = Field(  # type: ignore[assignment]
+        default_factory=lambda: [
+            _StrictMetricComponent(metric="smape", weight=0.7),
+            _StrictMetricComponent(metric="rmsle", weight=0.3),
+        ]
+    )
+
 
 class _StrictForecastConfig(ForecastConfig):
     model_config = _FORBID_EXTRA
@@ -307,6 +357,15 @@ class _StrictModelEntry(ModelEntry):
 
 class _StrictModelsConfig(ModelsConfig):
     model_config = _FORBID_EXTRA
+
+    # Retype each per-model field so strict mode cascades into the nested
+    # entry; without this, ``models.sarima.typo`` is silently accepted
+    # because the inherited annotation points at lenient ``ModelEntry``.
+    sarima: Optional[_StrictModelEntry] = None  # type: ignore[assignment]
+    random_forest: Optional[_StrictModelEntry] = None  # type: ignore[assignment]
+    xgboost: Optional[_StrictModelEntry] = None  # type: ignore[assignment]
+    lightgbm: Optional[_StrictModelEntry] = None  # type: ignore[assignment]
+    ensemble: Optional[_StrictModelEntry] = None  # type: ignore[assignment]
 
 
 class _StrictFeaturesConfig(FeaturesConfig):

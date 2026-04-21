@@ -321,7 +321,6 @@ def test_inverse_cv_loss_no_warning_for_homogeneous_xgb() -> None:
         ens._resolve_weights()  # must not raise
 
 
-@pytest.mark.requires_xgboost
 def test_inverse_cv_loss_no_warning_for_homogeneous_sarima() -> None:
     """No warning when all members are full-fold (all SARIMA)."""
     from boa_forecaster.models.sarima import SARIMASpec
@@ -333,6 +332,22 @@ def test_inverse_cv_loss_no_warning_for_homogeneous_sarima() -> None:
         [sarima1, sarima2],
         weighting="inverse_cv_loss",
         member_scores={"sarima": 0.3, "sarima_b": 0.4},
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        ens._resolve_weights()  # must not raise
+
+
+def test_inverse_cv_loss_single_member_no_warning() -> None:
+    """Single-member ensembles cannot be "mixed" — no warning regardless of flag."""
+    from boa_forecaster.models.sarima import SARIMASpec
+
+    sarima = SARIMASpec()
+    ens = EnsembleSpec(
+        [sarima],
+        weighting="inverse_cv_loss",
+        member_scores={"sarima": 0.3},
     )
 
     with warnings.catch_warnings():

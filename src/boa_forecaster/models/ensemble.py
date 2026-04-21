@@ -201,22 +201,25 @@ class EnsembleSpec:
         elif self.weighting == "equal":
             w = np.ones(n, dtype=float)
         elif self.weighting == "inverse_cv_loss":
-            flagged = {
-                m.__class__.__name__
-                for m in self.members
-                if getattr(m, "uses_early_stopping", False)
-            }
             has_full_fold = any(
                 not getattr(m, "uses_early_stopping", False) for m in self.members
             )
-            if flagged and has_full_fold:
-                warnings.warn(
-                    f"Ensemble mixes early-stopping members ({flagged}) with full-fold members "
-                    f"under strategy='inverse_cv_loss'. CV losses are not directly comparable "
-                    f"and weighting will be biased. Consider strategy='equal' or explicit weights.",
-                    UserWarning,
-                    stacklevel=2,
-                )
+            if has_full_fold:
+                flagged = {
+                    m.__class__.__name__
+                    for m in self.members
+                    if getattr(m, "uses_early_stopping", False)
+                }
+                if flagged:
+                    warnings.warn(
+                        f"Ensemble mixes early-stopping members ({flagged}) with full-fold "
+                        f"members under strategy='inverse_cv_loss'. CV losses are not directly "
+                        f"comparable and weighting will be biased. Consider strategy='equal' or "
+                        f"explicit weights. (Flagged members set `uses_early_stopping=True` on "
+                        f"the spec; unflagged members default to False.)",
+                        UserWarning,
+                        stacklevel=2,
+                    )
             scores = np.asarray(
                 [self.member_scores.get(m.name, np.nan) for m in self.members],
                 dtype=float,

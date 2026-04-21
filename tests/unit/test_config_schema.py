@@ -263,3 +263,125 @@ def test_cli_strict_flag_plumbing_via_from_dict() -> None:
     # strict=True → fails (mirrors CLI --strict)
     with pytest.raises(ValidationError):
         BoaConfig.from_dict(dirty, strict=True)
+
+
+# ── 8. Strict cascades into deep nesting (PR #24 review HIGH #1) ──────────────
+
+
+class TestStrictCascadesIntoNested:
+    """``strict=True`` must reject typos at every nesting depth, not just top.
+
+    Regression for PR #24 code review: ``_StrictModelsConfig`` inherited the
+    ``sarima: Optional[ModelEntry]`` annotation unchanged, so Pydantic kept
+    validating the ``sarima`` sub-dict against the lenient ``ModelEntry``
+    (``extra="allow"``).  Same bug for ``_StrictMetricsConfig.components``.
+    """
+
+    def test_models_sarima_nested_typo_raises(self) -> None:
+        data = {
+            "models": {
+                "active": "sarima",
+                "sarima": {"enabled": True, "typo_nested": 123},
+            }
+        }
+        with pytest.raises(ValidationError):
+            BoaConfig.from_dict(data, strict=True)
+
+    def test_models_random_forest_nested_typo_raises(self) -> None:
+        data = {
+            "models": {
+                "active": "random_forest",
+                "random_forest": {"enabled": True, "typo_rf": 1},
+            }
+        }
+        with pytest.raises(ValidationError):
+            BoaConfig.from_dict(data, strict=True)
+
+    def test_models_ensemble_nested_typo_raises(self) -> None:
+        data = {
+            "models": {
+                "active": "ensemble",
+                "ensemble": {"enabled": True, "typo_ens": 1},
+            }
+        }
+        with pytest.raises(ValidationError):
+            BoaConfig.from_dict(data, strict=True)
+
+    def test_metrics_component_nested_typo_raises(self) -> None:
+        data = {
+            "metrics": {
+                "components": [
+                    {"metric": "smape", "weight": 0.7, "typo_in_component": 1}
+                ]
+            }
+        }
+        with pytest.raises(ValidationError):
+            BoaConfig.from_dict(data, strict=True)
+
+
+# ── 9. DataConfig.freq accepts any pandas alias (PR #24 review HIGH #2) ───────
+
+
+class TestDataConfigFreqValidator:
+    """``DataConfig.freq`` should accept anything ``to_offset`` accepts.
+
+    The original ``Literal["MS", "M", "W", "D", "h", "H"]`` rejected common
+    valid aliases like ``"15min"``, ``"Q"``, ``"B"``.  Replace with a
+    field_validator that delegates to ``pd.tseries.frequencies.to_offset``.
+    """
+
+    @pytest.mark.parametrize(
+        "freq",
+        ["MS", "M", "W", "D", "h", "H", "B", "Q", "QS", "15min", "2h", "7D"],
+    )
+    def test_pandas_alias_accepted(self, freq: str) -> None:
+        cfg = DataConfig(input_path="foo.xlsx", freq=freq)
+        assert cfg.freq == freq
+
+    def test_unknown_alias_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            DataConfig(input_path="foo.xlsx", freq="monthly")
+
+    def test_empty_string_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            DataConfig(input_path="foo.xlsx", freq="")
+
+
+# ── 10. sigma_threshold ↔ threshold aliasing (PR #24 review MEDIUM) ───────────
+
+
+class TestStandardizationThresholdAlias:
+    """``sigma_threshold`` and ``threshold`` must be the same field.
+
+    Having two fields with the same default silently ignored whichever value
+    a caller set on the "wrong" name.  AliasChoices lets both names populate
+    a single canonical field.
+    """
+
+    def test_sigma_threshold_populates_threshold(self) -> None:
+        cfg = StandardizationConfig(sigma_threshold=3.5)
+        assert cfg.threshold == pytest.approx(3.5)
+
+    def test_threshold_populates_threshold(self) -> None:
+        cfg = StandardizationConfig(threshold=3.5)
+        assert cfg.threshold == pytest.approx(3.5)
+
+    def test_legacy_attribute_still_readable(self) -> None:
+        """``cfg.sigma_threshold`` must still resolve for v2.x back-compat."""
+        cfg = StandardizationConfig(threshold=3.5)
+        assert cfg.sigma_threshold == pytest.approx(3.5)
+
+
+# ── 11. ForecastConfig.n_periods upper bound (PR #24 review LOW) ──────────────
+
+
+class TestForecastNPeriodsUpperBound:
+    """Reject absurd forecast horizons that would OOM on load."""
+
+    def test_ten_thousand_passes(self) -> None:
+        cfg = ForecastConfig(n_periods=10_000)
+        assert cfg.n_periods == 10_000
+
+    def test_ten_thousand_one_fails(self) -> None:
+        with pytest.raises(ValidationError):
+            ForecastConfig(n_periods=10_001)
