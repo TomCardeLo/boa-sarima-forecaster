@@ -57,6 +57,7 @@ from boa_forecaster.optimizer import optimize_arima, optimize_model
 # ── Preprocessing & standardisation (Phase 0) ────────────────────────────────
 from boa_forecaster.preprocessor import clean_zeros, fill_blanks, flag_intermittent
 from boa_forecaster.standardization import (
+    WMA_THRESHOLD_HIGH_VOLATILITY,
     clip_outliers,
     weighted_moving_stats,
     weighted_moving_stats_batch,
@@ -92,6 +93,7 @@ __all__ = [
     "weighted_moving_stats",
     "weighted_moving_stats_series",
     "weighted_moving_stats_batch",
+    "WMA_THRESHOLD_HIGH_VOLATILITY",
     # feature engineering
     "FeatureConfig",
     "FeatureEngineer",

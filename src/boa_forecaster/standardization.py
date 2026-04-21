@@ -36,6 +36,14 @@ import pandas as pd
 # Decaying weights: distance 1 -> 0.3, distance 2 -> 0.2, distance 3 -> 0.1.
 # Values chosen empirically to balance sensitivity vs. noise tolerance.
 _REFERENCE_WEIGHTS: np.ndarray = np.array([0.3, 0.2, 0.1])
+
+# Opt-in threshold for series with legitimate extreme spikes.
+# The library default (2.5σ) is designed for typical demand series but
+# over-clips real peaky processes — e.g. PM2.5 pollution episodes, electricity
+# demand spikes, or financial return fat-tails — where a higher tolerance is
+# more appropriate.  Pass this constant as `threshold=WMA_THRESHOLD_HIGH_VOLATILITY`
+# to loosen the clipping boundary; the library default of 2.5 is unchanged.
+WMA_THRESHOLD_HIGH_VOLATILITY: float = 3.5
 # Threshold below which a sum of weights is treated as zero (avoids div-by-0
 # on all-edge or all-zero-weight neighbourhoods).
 _WEIGHT_EPSILON: float = 1e-10

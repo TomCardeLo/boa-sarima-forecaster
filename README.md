@@ -84,6 +84,28 @@ neighbourhood (configurable via `threshold`), generating an `adjusted_value`
 column alongside the raw demand. Both columns are modelled independently; the
 one with the lower optimisation score is used for the final forecast.
 
+#### Tuning WMA for high-volatility data
+
+The default 2.5σ threshold is appropriate for most demand series, but it
+over-clips legitimate extreme spikes found in certain domains. Use the
+opt-in constant `WMA_THRESHOLD_HIGH_VOLATILITY = 3.5` to widen the clipping
+boundary when your series contains genuine high-amplitude events:
+
+| Domain | Typical spike pattern |
+|--------|-----------------------|
+| **Air quality (PM2.5/PM10)** | Short-lived pollution episodes — wildfires, dust storms, traffic surges — can push readings 5–10× the baseline without being sensor artefacts. |
+| **Energy / electricity demand** | Cold-snap or heat-wave peaks can exceed the rolling mean by 3–4σ; clipping them distorts capacity-planning forecasts. |
+| **Retail stockout-recovery** | After a stockout period, the first restock order often reflects accumulated demand and legitimately dwarfs the recent rolling average. |
+| **Financial return series (fat tails)** | Daily or intraday returns follow heavy-tailed distributions; a 2.5σ cutoff destroys real market events captured in the historical record. |
+| **IoT sensor bursts** | Legitimate network-traffic spikes, vibration anomalies, or power-consumption surges can exceed 2.5σ while still representing real physical events. |
+
+```python
+from boa_forecaster.standardization import clip_outliers, WMA_THRESHOLD_HIGH_VOLATILITY
+cleaned = clip_outliers(series_with_real_spikes, threshold=WMA_THRESHOLD_HIGH_VOLATILITY)
+```
+
+The library default (2.5) is **not changed**; this constant is purely opt-in.
+
 ### 3 — Bayesian Optimisation (Optuna TPE)
 
 The **Tree-structured Parzen Estimator (TPE)** searches the model's
