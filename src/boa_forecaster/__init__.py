@@ -19,10 +19,13 @@ from boa_forecaster.benchmarks import (
 )
 from boa_forecaster.features import FeatureConfig, FeatureEngineer
 from boa_forecaster.metrics import (
+    METRIC_DICT_REGISTRY,
     METRIC_REGISTRY,
     build_combined_metric,
     combined_metric,
+    f1_by_bucket,
     hit_rate,
+    hit_rate_weighted,
     mae,
     mape,
     rmse,
@@ -77,9 +80,12 @@ __all__ = [
     "rmse",
     "mape",
     "hit_rate",
+    "hit_rate_weighted",
+    "f1_by_bucket",
     "combined_metric",
     "build_combined_metric",
     "METRIC_REGISTRY",
+    "METRIC_DICT_REGISTRY",
     # validation
     "walk_forward_validation",
     "validate_by_group",
