@@ -63,6 +63,15 @@ def _enabled_model_names(cfg: BoaConfig) -> list[str]:
     show_default=True,
     help="Include Seasonal-Naïve and ETS as zero-budget baselines.",
 )
+@click.option(
+    "--strict",
+    is_flag=True,
+    default=False,
+    help=(
+        "Load config in strict mode: unknown keys raise ValidationError. "
+        "Default is off for v2.x back-compat."
+    ),
+)
 def compare(
     config_path: str,
     output_dir: str,
@@ -70,9 +79,10 @@ def compare(
     test_size: int,
     min_train_size: int,
     baselines: bool,
+    strict: bool,
 ) -> None:
     """Optimise every enabled model and rank them on walk-forward folds."""
-    cfg = BoaConfig.load(config_path)
+    cfg = BoaConfig.load(config_path, strict=strict)
     out = ensure_output_dir(output_dir)
 
     series = load_series_from_config(cfg)

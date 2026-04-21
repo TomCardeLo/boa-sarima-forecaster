@@ -40,9 +40,18 @@ logger = logging.getLogger(__name__)
     default=None,
     help="Override optimization.n_calls from the config.",
 )
-def run(config_path: str, output_dir: str, n_trials: int | None) -> None:
+@click.option(
+    "--strict",
+    is_flag=True,
+    default=False,
+    help=(
+        "Load config in strict mode: unknown keys raise ValidationError. "
+        "Default is off for v2.x back-compat."
+    ),
+)
+def run(config_path: str, output_dir: str, n_trials: int | None, strict: bool) -> None:
     """Optimise the active model and emit a point forecast."""
-    cfg = BoaConfig.load(config_path)
+    cfg = BoaConfig.load(config_path, strict=strict)
     out = ensure_output_dir(output_dir)
 
     series = load_series_from_config(cfg)
