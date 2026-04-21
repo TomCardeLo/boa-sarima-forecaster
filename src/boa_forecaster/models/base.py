@@ -190,6 +190,9 @@ class ModelSpec(Protocol):
 
     name: str
     needs_features: bool
+    # Resolved via getattr(spec, "uses_early_stopping", False) at call sites — third-party
+    # specs predating this flag remain runtime-compatible (isinstance with @runtime_checkable
+    # would still require the attribute, but no such check is used in the ensemble path).
     uses_early_stopping: bool
 
     @property
