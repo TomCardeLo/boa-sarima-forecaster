@@ -24,6 +24,7 @@ import joblib
 import optuna
 
 if TYPE_CHECKING:
+    import numpy as np
     import pandas as pd
 
     from boa_forecaster.features import FeatureConfig
@@ -98,10 +99,12 @@ class OptimizationResult:
     quantile_forecasts: object | None = None
     """Optional quantile forecasts attached by callers who fit a probabilistic
     spec.  ``None`` for point-forecast models."""
-    bias_correction: object | None = None
+    bias_correction: np.ndarray | None = None
     """Optional per-period multiplicative bias factors computed by
     post-training seasonal bias correction.  ``None`` when disabled or
-    when the study fell back."""
+    when the study fell back.  Annotation is stringified by
+    ``from __future__ import annotations`` — numpy is imported only under
+    ``TYPE_CHECKING`` so ``models/base.py`` stays import-light at runtime."""
 
     def save(self, path: str | Path) -> None:
         """Persist this result to *path* using joblib serialisation."""

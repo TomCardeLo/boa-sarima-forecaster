@@ -80,28 +80,26 @@ def compute_seasonal_bias(
         >>> np.allclose(factors, 1.0)
         True
     """
-    # Normalise inputs to arrays, preserving the original Series for index check.
-    true_series = y_true if isinstance(y_true, pd.Series) else None
     yt = np.asarray(y_true, dtype=float)
     yp = np.asarray(y_pred, dtype=float)
 
     n = len(yt)
-    use_datetime = (
-        true_series is not None
-        and isinstance(true_series.index, pd.DatetimeIndex)
-        and periods == 12
-    )
 
-    if use_datetime:
-        # Bucket by calendar month: month ∈ [1..12] → index ∈ [0..11]
+    # Bucket by calendar month when input carries a DatetimeIndex (and periods==12);
+    # otherwise position-based starting at start_period. Inline isinstance lets
+    # mypy narrow y_true to pd.Series across the branch.
+    if (
+        isinstance(y_true, pd.Series)
+        and isinstance(y_true.index, pd.DatetimeIndex)
+        and periods == 12
+    ):
         # bias[0]=January, bias[6]=July regardless of start_period.
         # start_period is used ONLY for ndarray (position-based) alignment.
-        buckets = (true_series.index.month - 1) % periods
+        buckets = (y_true.index.month - 1) % periods
     else:
-        # Position-based: observation i starts at bucket (start_period - 1)
         buckets = (np.arange(n) + (start_period - 1)) % periods
 
-    factors = np.ones(periods, dtype=float)
+    factors: np.ndarray = np.ones(periods, dtype=float)
     for k in range(periods):
         mask = buckets == k
         yt_k = yt[mask]
@@ -163,14 +161,15 @@ def apply_seasonal_bias(
         >>> result[0]
         150.0
     """
-    is_series = isinstance(forecast, pd.Series)
     periods = len(bias)
 
-    use_datetime = (
-        is_series and isinstance(forecast.index, pd.DatetimeIndex) and periods == 12
-    )
-
-    if use_datetime:
+    # Inline isinstance checks let mypy narrow `forecast` across each branch
+    # (a local `is_series` boolean does not propagate the narrowing).
+    if (
+        isinstance(forecast, pd.Series)
+        and isinstance(forecast.index, pd.DatetimeIndex)
+        and periods == 12
+    ):
         month_buckets = (forecast.index.month - 1) % 12
         factors = bias[month_buckets]
     else:
@@ -178,7 +177,7 @@ def apply_seasonal_bias(
         positions = (np.arange(n) + (start_period - 1)) % periods
         factors = bias[positions]
 
-    if is_series:
+    if isinstance(forecast, pd.Series):
         return pd.Series(
             np.asarray(forecast, dtype=float) * factors,
             index=forecast.index,
