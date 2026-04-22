@@ -39,8 +39,9 @@ from boa_forecaster.models import (
     MODEL_REGISTRY,
     EnsembleSpec,
     LightGBMSpec,  # _MissingExtra sentinel if lightgbm not installed
+    LSTMSpec,  # _MissingExtra sentinel if torch not installed
     ProphetSpec,  # _MissingExtra sentinel if prophet not installed
-    QuantileForecast,  # None sentinel if neither lightgbm nor xgboost installed
+    QuantileForecast,  # _MissingExtra sentinel if neither lightgbm nor xgboost installed
     QuantileMLSpec,  # _MissingExtra sentinel if neither lightgbm nor xgboost installed
     XGBoostSpec,  # _MissingExtra sentinel if xgboost not installed
     build_ensemble,
@@ -121,6 +122,7 @@ __all__ = [
     "XGBoostSpec",
     "LightGBMSpec",
     "ProphetSpec",
+    "LSTMSpec",
     "QuantileMLSpec",
     "QuantileForecast",
     "EnsembleSpec",

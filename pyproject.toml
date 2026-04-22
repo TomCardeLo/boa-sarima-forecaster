@@ -53,6 +53,9 @@ lightgbm = [
 prophet = [
     "prophet>=1.1",
 ]
+deep = [
+    "torch>=2.1",
+]
 ml = [
     "scikit-learn>=1.3",
     "xgboost>=2.0",
@@ -100,6 +103,7 @@ markers = [
     "requires_xgboost: tests that need xgboost installed",
     "requires_lightgbm: tests that need lightgbm installed",
     "requires_prophet: tests that need prophet installed",
+    "requires_torch: tests that need torch installed",
     "integration: multi-model end-to-end tests",
     "perf: performance regression benchmarks (pytest-benchmark); skipped unless explicitly run",
 ]
@@ -113,3 +117,10 @@ python_version = "3.9"
 # statsforecast, joblib) ship no or partial stubs — silencing them keeps the
 # signal focused on our own src/ code.
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# torch ships py.typed but its internals use match/case (Python 3.10+),
+# which mypy rejects when targeting python_version = "3.9". Skip analysis
+# of torch's own source files entirely — they are not our code.
+module = ["torch", "torch.*"]
+follow_imports = "skip"

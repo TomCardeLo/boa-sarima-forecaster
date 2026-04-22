@@ -106,6 +106,14 @@ try:
 except ImportError:
     ProphetSpec = _MissingExtra("prophet", "prophet")  # type: ignore[assignment,misc]
 
+# Optional: LSTM (requires torch package)
+try:
+    from boa_forecaster.models.lstm import LSTMSpec  # noqa: F401
+
+    register_model("lstm", LSTMSpec)
+except ImportError:
+    LSTMSpec = _MissingExtra("torch", "deep")  # type: ignore[assignment,misc]
+
 # Optional: QuantileML (requires lightgbm OR xgboost — uses whichever is installed)
 try:
     from boa_forecaster.models.quantile import (  # noqa: F401
@@ -139,6 +147,7 @@ __all__ = [
     "XGBoostSpec",
     "LightGBMSpec",
     "ProphetSpec",
+    "LSTMSpec",
     "QuantileMLSpec",
     "QuantileForecast",
     "EnsembleSpec",
