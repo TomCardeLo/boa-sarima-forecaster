@@ -7,6 +7,172 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.4.0] — 2026-04-22
+
+Track H release — "Probabilistic, Regulatory & Deep-Learning Horizons".
+Bundles three new model families (Prophet, quantile gradient boosters,
+LSTM), finishes the Pydantic config rollout, and lands the
+2026-04-20 feedback from the CAR PM2.5 hourly pipeline (regulatory
+metric presets, SARIMA hourly tuning, ensemble safety, environmental
+preprocessing defaults, post-training seasonal bias correction).
+No breaking API changes — additive and behaviour-tightening only.
+The `sarima_bayes` compatibility shim and v1.x deprecation warnings
+are unchanged from v2.3.0.
+
+### Added — Model families (H1, H2, H3)
+
+- **`ProphetSpec`** (`models/prophet.py`, H1) — Meta's Prophet as a
+  first-class `ModelSpec` for interpretable trend + seasonality +
+  holidays decomposition.  Search space covers
+  `changepoint_prior_scale` (log-uniform 0.001–0.5),
+  `seasonality_prior_scale` and `holidays_prior_scale` (0.01–10), and
+  `seasonality_mode` (additive / multiplicative).  Behind the
+  `prophet` optional extra; degrades to a `_MissingExtra` sentinel
+  when not installed.  CI installs it on Python 3.11 only (wheels
+  fragile on 3.12+).
+- **`QuantileMLSpec`** (`models/quantile.py`, H2) — probabilistic
+  forecasts via LightGBM `objective=quantile` or XGBoost
+  `reg:quantileerror`.  Fits **one booster per quantile**; returns a
+  `QuantileForecast(median, lower, upper)` dataclass on top of the
+  shared `BaseMLSpec` feature pipeline.  Sets
+  `uses_early_stopping = True` so the H9a ensemble warning fires when
+  mixed with full-fold members.  `OptimizationResult` gains an
+  optional `quantile_forecasts` field — additive, no break for
+  point-forecast consumers.
+- **New `metrics_probabilistic.py`** (H2) — `pinball_loss(y_true,
+  y_pred, quantile)` and `interval_coverage(y_true, lower, upper)`.
+  `pinball_loss` is registered in `METRIC_REGISTRY` so it can be
+  selected as the Optuna objective from YAML.  Both are re-exported
+  from the package root.
+- **`LSTMSpec`** (`models/lstm.py`, H3) — PyTorch LSTM baseline
+  exposing `hidden_size`, `num_layers`, `dropout`, `learning_rate`,
+  `n_epochs`, `batch_size`, `window_size`.  Train-only normalisation
+  (80% slice) avoids val-loss leakage; patience-5 early stopping with
+  best-state restore.  CPU by default; `device="auto"` opts into
+  CUDA.  Behind the `deep` optional extra (deliberately **not** in
+  `[all]` — torch is heavy).  New `test-deep-extras` CI job, Python
+  3.11 only, step-level `continue-on-error` tolerated.
+
+### Added — Regulatory metrics & presets (H7-core, H7-presets)
+
+- **`hit_rate_weighted(y_true, y_pred, edges, weights=None)`**
+  (`metrics.py`, H7-core) — bucket-accuracy with per-bucket weights so
+  misses in high-stakes buckets count more.  `weights=None` is
+  uniform and reduces to `hit_rate`.  Registered in
+  `METRIC_REGISTRY`.
+- **`f1_by_bucket(y_true, y_pred, edges, labels=None) -> dict[str,
+  float]`** (`metrics.py`, H7-core) — per-category F1; uses sklearn
+  if installed, vectorised numpy fallback otherwise.  No new required
+  dependency.  Registered in `METRIC_REGISTRY`.
+- **New `presets/` package + `presets/air_quality.py`** (H7-presets)
+  — first preset pack, scoped to air-quality.  Ships
+  `ICA_EDGES_PM25_CO2017`, `ICA_EDGES_PM25_USAQI`, `ICA_LABELS_6`,
+  `ICA_WEIGHTS_HEALTH`, plus `hit_rate_ica(...)` and
+  `hit_rate_ica_weighted(...)` thin wrappers around the core
+  bucketed metrics.  Imported explicitly from
+  `boa_forecaster.presets.air_quality` — **not** re-exported from
+  the top-level package, keeping core lean.
+
+### Added — Hourly SARIMA & high-volatility WMA (H8, H9b)
+
+- **`SARIMASpec.for_frequency(freq)` classmethod** (`models/sarima.py`,
+  H8) — frequency-aware `seasonal_period` defaults: `MS`/`M` → 12,
+  `W` → 52, `D` → 7, `h`/`H` → tuneable
+  `CategoricalParam([24, 168])` (daily vs. weekly seasonality).
+  Mirrors `FeatureConfig.for_frequency` (v2.3, G1).  `optimize_model`
+  honours the tuneable form when present.
+- **`WMA_THRESHOLD_HIGH_VOLATILITY = 3.5` named constant**
+  (`standardization.py`, H9b) — opt-in alternative to the library
+  default `2.5σ` for peaky series (PM2.5 pollution episodes,
+  electricity demand spikes, retail stockout-recovery, financial
+  fat-tail returns, IoT sensor bursts).  The library-wide default
+  stays `2.5` — no behaviour change for existing callers.
+
+### Added — Post-training bias correction (H5)
+
+- **New `postprocess.py`** — `compute_seasonal_bias(y_true, y_pred,
+  periods=12, start_period=1, clip_range=(0.5, 2.0))` and
+  `apply_seasonal_bias(forecast, bias, start_period=1)` implement the
+  per-calendar-period multiplicative bias correction validated in the
+  CAR PM2.5 production pipeline.  Median-of-residual-ratios
+  (robust to outliers), clipped to `[0.5, 2.0]` to avoid blow-ups.
+  Generalisable beyond monthly via the `periods` parameter.  When
+  inputs carry a `DatetimeIndex` and `periods=12`, alignment is
+  always by calendar month (`bias[0]` = January) regardless of
+  `start_period`.
+- **`optimize_model(..., apply_bias_correction=False)`** — opt-in
+  kwarg.  When `True`, bias is computed on the final CV fold's
+  residuals and attached to `OptimizationResult.bias_correction`.
+  Series shorter than 36 observations skip computation with a
+  `WARNING` log naming the model and required length.
+- **CLI `--bias-correction` flag** on `boa-forecaster run` — applies
+  the stored factors during forecast and echoes the active factor
+  array.
+
+### Added — Pydantic finishing touches (H4)
+
+- **`BoaConfig.from_dict(...)` classmethod** — programmatic
+  construction for tests and library callers without round-tripping
+  through YAML.
+- **`Literal` validators on sub-models** —
+  `StandardizationConfig.method` ∈ `{"sigma", "iqr"}`,
+  `DataConfig.freq` ∈ `{"MS", "M", "W", "D", "h", "H"}` (aligns with
+  G1 from v2.3).  `StandardizationConfig.threshold ∈ (0, 10]`,
+  `ForecastConfig.n_periods ≥ 1`.
+
+### Changed
+
+- **CLI gains `--strict` flag** on `run`, `compare`, `validate` (H4)
+  — flips Pydantic `extra="allow"` → `extra="forbid"` at load time.
+  Default stays `allow` for v2.x back-compat.  Use `--strict` in CI
+  to catch typo'd or stale config keys.
+- **SARIMA `seasonal_period` is tuneable on hourly data** (H8) —
+  previously a fixed constant of 12 across all frequencies.  When the
+  spec is built via `SARIMASpec.for_frequency("h")` the search space
+  now contains `seasonal_period` as a `CategoricalParam([24, 168])`.
+
+### Warnings
+
+- **`EnsembleSpec` `inverse_cv_loss` warns when mixing early-stopping
+  members** (H9a) — gradient boosters with early stopping evaluate
+  on an inner validation split, while SARIMA / Prophet / RF use the
+  full fold.  Their CV losses are not directly comparable, so
+  `inverse_cv_loss` weighting is mathematically biased toward the
+  early-stopping members.  The ensemble now emits a `UserWarning`
+  flagging the offending member class names and recommending
+  `strategy="equal"` or explicit weights.  New `uses_early_stopping`
+  attribute on `ModelSpec` Protocol; defaults to `False`, set to
+  `True` on `XGBoostSpec`, `LightGBMSpec`, and `QuantileMLSpec`.
+
+### Fixed
+
+- **H5 code-review follow-ups** — `apply_seasonal_bias` round-trip
+  now correct for `start_period != 1` (previously the DatetimeIndex
+  branch and the position branch disagreed).
+  `_compute_bias_from_last_fold` reads `test_size` from
+  `model_spec.forecast_horizon` instead of hardcoding 12, so
+  bias-correction is wired correctly for non-12 horizons.  Short
+  series now emit a `WARNING` instead of silently no-op'ing.
+
+### Contributors
+
+Tracks H1, H2, H3, H4, H7-core, H7-presets, H8, H9a, H9b executed in
+parallel by Sonnet implementer subagents (Wave A) under Opus
+orchestration; Track H5 ran serially in Phase 2 after the
+`OptimizationResult` shape stabilised post-H2.  Code reviews by Opus
+`code-reviewer` subagent; release gate run on main thread.
+
+Special thanks to **Daniel Méndez** and the **CAR / Cundinamarca
+PM2.5 hourly pipeline team** (Bogotá + Cundinamarca, 34 monitoring
+stations, 2016–2026) for the 2026-04-20 feedback (`tasks/feedback_aire.md`)
+that drove H5 (`sesgo_mensual_para_ajuste.csv` pattern), H7
+(weighted bucket metrics + ICA presets), H8 (hourly SARIMA), and
+H9 (ensemble safety + WMA high-volatility constant).
+
+[2.4.0]: https://github.com/TomCardeLo/boa-forecaster/compare/v2.3.0...v2.4.0
+
+---
+
 ## [2.3.0] — 2026-04-20
 
 Correctness & ecosystem release bundling Tracks E/F/G of the post-v2.2
