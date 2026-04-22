@@ -76,6 +76,29 @@ jobs:
       - name: Run tests
         run: pytest tests/ -v --tb=short --cov=src/boa_forecaster --cov-report=term-missing --cov-fail-under=80
 
+  test-deep-extras:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    continue-on-error: true  # optional — not required for merge
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (with deep extras — CPU-only torch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev,deep]"
+          pip install pytest-cov
+
+      - name: Run LSTM tests
+        run: pytest tests/unit/test_lstm.py -v --tb=short -m "slow and requires_torch"
+
   test-slow:
     # Weekly performance / slow-suite sanity — not run on push/PR to keep
     # those pipelines fast. Deselected elsewhere via `pytest -m "not slow"`
