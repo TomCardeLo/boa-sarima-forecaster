@@ -3,4 +3,7 @@ omit =
     src/boa_forecaster/models/random_forest.py
     src/boa_forecaster/models/xgboost.py
     src/boa_forecaster/models/lightgbm.py
+    src/boa_forecaster/models/lstm.py
+    src/boa_forecaster/models/prophet.py
+    src/boa_forecaster/models/quantile.py
     src/boa_forecaster/models/_utils.py
