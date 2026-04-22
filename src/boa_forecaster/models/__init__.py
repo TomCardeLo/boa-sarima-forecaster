@@ -116,7 +116,7 @@ try:
     register_model("quantile_ml", QuantileMLSpec)
 except ImportError:
     QuantileMLSpec = _MissingExtra("lightgbm or xgboost", "ml")  # type: ignore[assignment,misc]
-    QuantileForecast = None  # type: ignore[assignment,misc]
+    QuantileForecast = _MissingExtra("lightgbm or xgboost", "ml")  # type: ignore[assignment,misc]
 
 # Ensemble (Track D / X3) — registered last, after optional-ML imports are resolved.
 from boa_forecaster.models.ensemble import (  # noqa: E402

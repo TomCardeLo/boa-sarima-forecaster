@@ -21,7 +21,7 @@ Design
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 import numpy as np
 import pandas as pd
@@ -67,7 +67,7 @@ class QuantileForecast:
     median: pd.Series
     lower: pd.Series
     upper: pd.Series
-    quantiles: dict  # dict[float, pd.Series]
+    quantiles: dict[float, pd.Series]
 
 
 class QuantileMLSpec(BaseMLSpec):
@@ -237,9 +237,7 @@ class QuantileMLSpec(BaseMLSpec):
         For LightGBM, clips ``num_leaves`` to ``2^max_depth - 1`` when
         ``max_depth > 0`` (same constraint as ``LightGBMSpec``).
         """
-        from boa_forecaster.models.base import suggest_from_space
-
-        params = suggest_from_space(trial, self.search_space)
+        params = super().suggest_params(trial)
         if self.base == "lightgbm":
             max_depth = params["max_depth"]
             if max_depth > 0:
@@ -260,7 +258,7 @@ class QuantileMLSpec(BaseMLSpec):
         merged = {**params, **self._quantile_fit_kwargs(0.5)}
         X_tr, y_tr, X_val, y_val = split_for_early_stopping(X, y)
         if self.base == "lightgbm":
-            callbacks = [
+            callbacks: list[Callable[..., Any]] = [
                 lgb.early_stopping(self.early_stopping_rounds, verbose=False),
                 lgb.log_evaluation(-1),
             ]
@@ -299,7 +297,7 @@ class QuantileMLSpec(BaseMLSpec):
         if self.base == "lightgbm":
             if use_early_stopping:
                 X_tr, y_tr, X_val, y_val = split_for_early_stopping(X, y)
-                callbacks = [
+                callbacks: list[Callable[..., Any]] = [
                     lgb.early_stopping(self.early_stopping_rounds, verbose=False),
                     lgb.log_evaluation(-1),
                 ]
@@ -361,9 +359,11 @@ class QuantileMLSpec(BaseMLSpec):
                 )
                 preds[q] = recursive_forecast(model, fe, train, horizon)
 
-            # Post-sort: isotonic correction across quantiles per step to prevent
-            # quantile crossing.  np.sort along axis=1 ensures lower ≤ median ≤ upper
-            # at every forecast step.
+            # Post-sort: rearrangement (Chernozhukov et al. 2010) across quantiles
+            # per forecast step.  np.sort along axis=1 ensures lower ≤ median ≤ upper
+            # at every step by reassigning crossed values to their value-order quantile
+            # slot.  Quantiles are pre-sorted ascending in __init__, so the i-th sorted
+            # column is by construction the empirical i-th quantile label.
             matrix = np.column_stack([preds[q].to_numpy() for q in quantiles])
             matrix_sorted = np.sort(matrix, axis=1)
             sorted_preds = {
