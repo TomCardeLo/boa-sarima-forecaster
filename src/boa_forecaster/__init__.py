@@ -32,6 +32,7 @@ from boa_forecaster.metrics import (
     rmsle,
     smape,
 )
+from boa_forecaster.metrics_probabilistic import interval_coverage, pinball_loss
 
 # ── Model registry & types (Phase 1) ─────────────────────────────────────────
 from boa_forecaster.models import (
@@ -39,6 +40,8 @@ from boa_forecaster.models import (
     EnsembleSpec,
     LightGBMSpec,  # _MissingExtra sentinel if lightgbm not installed
     ProphetSpec,  # _MissingExtra sentinel if prophet not installed
+    QuantileForecast,  # None sentinel if neither lightgbm nor xgboost installed
+    QuantileMLSpec,  # _MissingExtra sentinel if neither lightgbm nor xgboost installed
     XGBoostSpec,  # _MissingExtra sentinel if xgboost not installed
     build_ensemble,
     get_model_spec,
@@ -88,6 +91,8 @@ __all__ = [
     "build_combined_metric",
     "METRIC_REGISTRY",
     "METRIC_DICT_REGISTRY",
+    "pinball_loss",
+    "interval_coverage",
     # validation
     "walk_forward_validation",
     "validate_by_group",
@@ -116,6 +121,8 @@ __all__ = [
     "XGBoostSpec",
     "LightGBMSpec",
     "ProphetSpec",
+    "QuantileMLSpec",
+    "QuantileForecast",
     "EnsembleSpec",
     "build_ensemble",
     "MODEL_REGISTRY",
