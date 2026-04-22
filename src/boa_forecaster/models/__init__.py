@@ -98,6 +98,14 @@ try:
 except ImportError:
     LightGBMSpec = _MissingExtra("lightgbm", "lightgbm")  # type: ignore[assignment,misc]
 
+# Optional: Prophet (requires prophet package)
+try:
+    from boa_forecaster.models.prophet import ProphetSpec  # noqa: F401
+
+    register_model("prophet", ProphetSpec)
+except ImportError:
+    ProphetSpec = _MissingExtra("prophet", "prophet")  # type: ignore[assignment,misc]
+
 # Ensemble (Track D / X3) — registered last, after optional-ML imports are resolved.
 from boa_forecaster.models.ensemble import (  # noqa: E402
     EnsembleSpec,
@@ -118,6 +126,7 @@ __all__ = [
     "RandomForestSpec",
     "XGBoostSpec",
     "LightGBMSpec",
+    "ProphetSpec",
     "EnsembleSpec",
     "build_ensemble",
     "MODEL_REGISTRY",
