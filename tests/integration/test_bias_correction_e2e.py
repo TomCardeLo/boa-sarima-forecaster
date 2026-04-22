@@ -106,6 +106,10 @@ class TestBiasCorrectionE2E:
         series = results["series"]
         spec = results["spec"]
 
+        assert (
+            results["without"].best_params == results["with"].best_params
+        ), "apply_bias_correction must not perturb the optimizer's best_params"
+
         score_without = _score_on_last_fold(
             series, spec, results["without"].best_params, bias=None
         )

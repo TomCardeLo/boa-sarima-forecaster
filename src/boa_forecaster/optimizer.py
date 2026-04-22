@@ -63,18 +63,29 @@ def _compute_bias_from_last_fold(
     """Compute seasonal bias factors from the last CV fold's residuals.
 
     Uses the same expanding-window math as ``walk_forward_validation`` with
-    ``n_folds=3, test_size=12, min_train_size=24``.  The final (third) fold's
-    train/test split is replicated here so no extra imports are needed and the
-    logic stays co-located with the call site.
+    ``n_folds=3, test_size=model_spec.forecast_horizon (default 12),
+    min_train_size=24``.  The final (third) fold's train/test split is
+    replicated here so no extra imports are needed and the logic stays
+    co-located with the call site.
 
     Returns ``None`` on any failure so callers always get a clean result.
     """
     from boa_forecaster.postprocess import compute_seasonal_bias
 
     n_folds = 3
-    test_size = 12
+    test_size = int(getattr(model_spec, "forecast_horizon", 12))
     min_train_size = 24
     required = min_train_size + n_folds * test_size
+
+    if test_size < 2:
+        logger.warning(
+            "Bias computation skipped for %s: forecast_horizon=%d is too short "
+            "to compute a meaningful per-period median.",
+            model_spec.name,
+            test_size,
+        )
+        return None
+
     if len(series) < required:
         return None
 
@@ -89,6 +100,17 @@ def _compute_bias_from_last_fold(
         test = series.iloc[train_end:test_end]
 
         predictions = forecaster(train)
+
+        if len(predictions) < test_size:
+            logger.warning(
+                "Bias computation skipped for %s: forecaster returned %d predictions "
+                "but test_size=%d — refusing to silently trim.",
+                model_spec.name,
+                len(predictions),
+                test_size,
+            )
+            return None
+
         y_true = test.values[: len(predictions)]
         y_pred = predictions.values[: len(y_true)]
 
@@ -103,6 +125,7 @@ def _compute_bias_from_last_fold(
             "Bias computation failed for %s: %s — bias_correction will be None.",
             model_spec.name,
             exc,
+            exc_info=True,
         )
         return None
 
@@ -280,10 +303,27 @@ def optimize_model(
     )
 
     bias: np.ndarray | None = None
-    if apply_bias_correction and len(series) >= _MIN_BIAS_SERIES_LENGTH:
-        bias = _compute_bias_from_last_fold(
-            series, model_spec, study.best_params, feature_config
-        )
+    if apply_bias_correction:
+        _n_folds = 3
+        _test_size = int(getattr(model_spec, "forecast_horizon", 12))
+        _min_train = 24
+        _required = _min_train + _n_folds * _test_size
+        if len(series) < _required:
+            logger.warning(
+                "apply_bias_correction=True for %s but series has %d observations "
+                "(need %d = %d min_train + %d folds × %d test_size); "
+                "bias_correction will be None.",
+                model_spec.name,
+                len(series),
+                _required,
+                _min_train,
+                _n_folds,
+                _test_size,
+            )
+        else:
+            bias = _compute_bias_from_last_fold(
+                series, model_spec, study.best_params, feature_config
+            )
 
     return OptimizationResult(
         best_params=study.best_params,

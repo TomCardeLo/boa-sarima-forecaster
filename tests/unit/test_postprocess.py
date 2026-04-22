@@ -264,6 +264,68 @@ class TestInputTypes:
         assert isinstance(result, np.ndarray)
 
 
+# ─── round-trip with start_period != 1 ───────────────────────────────────────
+
+
+class TestRoundTripStartPeriod:
+    """Round-trip compute→apply works correctly with start_period=7 and DatetimeIndex.
+
+    Regression guard for the bug where ``compute_seasonal_bias`` used
+    ``(month - start_period) % 12`` on the DatetimeIndex path, causing a
+    6-bucket misalignment when start_period=7.  The correct convention is
+    that ``bias[k]`` always means calendar month k+1 (bias[0]=January) when
+    a DatetimeIndex is present.
+    """
+
+    def test_datetimeindex_roundtrip_start_period_7(self):
+        """compute→apply round-trip with DatetimeIndex starting July 2020."""
+        # 24 months of training data starting July 2020
+        idx = pd.date_range("2020-07-01", periods=24, freq="MS")
+        base = np.full(24, 100.0)
+        y_pred = pd.Series(base, index=idx)
+
+        # Inject a known January-only bias (factor 1.5); all other months = 1.0
+        jan_factor = 1.5
+        month_buckets = (idx.month - 1) % 12  # calendar-month convention
+        multipliers = np.where(month_buckets == 0, jan_factor, 1.0)
+        y_true = pd.Series(base * multipliers, index=idx)
+
+        # compute_seasonal_bias must store January's factor at bias[0]
+        bias = compute_seasonal_bias(y_true, y_pred, periods=12, start_period=7)
+        assert bias[0] == pytest.approx(
+            jan_factor, rel=1e-6
+        ), f"bias[0] (January) should be {jan_factor}, got {bias[0]}"
+        # All other months should be 1.0 (clamped by clip_range lower=0.5)
+        for m_idx in range(1, 12):
+            assert bias[m_idx] == pytest.approx(
+                1.0, abs=1e-10
+            ), f"bias[{m_idx}] should be 1.0, got {bias[m_idx]}"
+
+    def test_datetimeindex_apply_start_period_7_january_scaled(self):
+        """apply_seasonal_bias scales January correctly on a July-start forecast."""
+        # 12-month forecast starting July 2021 — contains exactly one January (2022)
+        idx = pd.date_range("2021-07-01", periods=12, freq="MS")
+        forecast = pd.Series(np.full(12, 200.0), index=idx)
+
+        bias = np.ones(12)
+        bias[0] = 1.5  # January factor (calendar-month convention)
+
+        result = apply_seasonal_bias(forecast, bias)
+        assert isinstance(result, pd.Series)
+
+        # January 2022 is at position 6 in this 12-month forecast
+        jan_pos = list(result.index.month).index(1)
+        assert result.iloc[jan_pos] == pytest.approx(
+            200.0 * 1.5, rel=1e-6
+        ), f"January should be scaled by 1.5; got {result.iloc[jan_pos]}"
+        # All non-January months should be unchanged
+        for i, month in enumerate(result.index.month):
+            if month != 1:
+                assert result.iloc[i] == pytest.approx(
+                    200.0, abs=1e-10
+                ), f"Month {month} should be 200.0, got {result.iloc[i]}"
+
+
 # ─── NaN handling ─────────────────────────────────────────────────────────────
 
 

@@ -15,6 +15,7 @@ from boa_forecaster.cli._pipeline import (
 )
 from boa_forecaster.config_schema import BoaConfig
 from boa_forecaster.optimizer import optimize_model
+from boa_forecaster.postprocess import apply_seasonal_bias
 
 logger = logging.getLogger(__name__)
 
@@ -87,8 +88,6 @@ def run(
     forecast = forecaster(series)
 
     if bias_correction and result.bias_correction is not None:
-        from boa_forecaster.postprocess import apply_seasonal_bias
-
         forecast = apply_seasonal_bias(forecast, result.bias_correction)
         rounded = [round(float(f), 3) for f in result.bias_correction]
         click.echo(f"[run] bias_correction applied: factors={rounded}")

@@ -40,9 +40,11 @@ def compute_seasonal_bias(
 
     When ``y_true`` is a ``pd.Series`` with a ``DatetimeIndex`` and
     ``periods == 12``, the bucket for each observation is determined by
-    ``(y_true.index.month - start_period) % 12``.  Otherwise observations
-    are assumed to be ordered sequentially starting at ``start_period`` and
-    the bucket is ``(i % periods)``.
+    ``(y_true.index.month - 1) % 12`` — i.e. ``bias[0]`` is always January,
+    ``bias[6]`` is always July, regardless of ``start_period``.
+    ``start_period`` is honored only for position-based (ndarray) alignment.
+    Otherwise observations are assumed to be ordered sequentially starting at
+    ``start_period`` and the bucket is ``(i % periods)``.
 
     Args:
         y_true: Actual observed values.
@@ -50,15 +52,25 @@ def compute_seasonal_bias(
         periods: Number of seasonal periods (default 12 for monthly data).
         start_period: Period index of the first observation; used for
             position-based alignment only.  For monthly data ``start_period=1``
-            means the first observation is January.
+            means the first observation is January.  Ignored when ``y_true``
+            has a ``DatetimeIndex`` and ``periods == 12`` (calendar-month
+            alignment takes precedence).
         clip_range: ``(lower, upper)`` hard bounds applied to every factor
             after computing the per-bucket median.
 
+    Notes:
+        Intended for non-negative target series.  Negative values in
+        ``y_true`` or ``y_pred`` produce arithmetically valid but semantically
+        misleading ratios; the clipping bounds prevent blow-ups but do not
+        recover the correct sign.
+
     Returns:
         ``np.ndarray`` of shape ``(periods,)`` where element ``k`` is the
-        multiplicative correction factor for period bucket ``k``.  Index 0
-        corresponds to the first bucket (e.g. January when
-        ``periods=12, start_period=1``).
+        multiplicative correction factor for period bucket ``k``.  When
+        inputs have a ``DatetimeIndex`` and ``periods=12``, ``bias[k]`` is
+        the factor for calendar month ``k+1`` (``bias[0]`` = January,
+        ``bias[6]`` = July).  ``start_period`` is honored only for
+        position-based (ndarray) alignment.
 
     Examples:
         >>> import numpy as np, pandas as pd
@@ -82,7 +94,9 @@ def compute_seasonal_bias(
 
     if use_datetime:
         # Bucket by calendar month: month ∈ [1..12] → index ∈ [0..11]
-        buckets = (true_series.index.month - start_period) % periods
+        # bias[0]=January, bias[6]=July regardless of start_period.
+        # start_period is used ONLY for ndarray (position-based) alignment.
+        buckets = (true_series.index.month - 1) % periods
     else:
         # Position-based: observation i starts at bucket (start_period - 1)
         buckets = (np.arange(n) + (start_period - 1)) % periods
@@ -131,7 +145,10 @@ def apply_seasonal_bias(
         bias: Per-period multiplicative factors from ``compute_seasonal_bias``.
         start_period: Period index of the first forecast observation; used for
             position-based alignment only.  Ignored when DatetimeIndex alignment
-            is active.
+            is active.  When ``bias`` has 12 elements and ``forecast`` carries a
+            ``DatetimeIndex``, ``bias[k]`` is looked up by calendar month
+            (``bias[0]`` = January, ``bias[6]`` = July) — matching the
+            convention established by ``compute_seasonal_bias``.
 
     Returns:
         Corrected forecast in the same container type as ``forecast`` (i.e.
