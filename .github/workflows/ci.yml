@@ -79,7 +79,6 @@ jobs:
   test-deep-extras:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    continue-on-error: true  # optional — not required for merge
 
     steps:
       - uses: actions/checkout@v4
@@ -92,11 +91,11 @@ jobs:
       - name: Install dependencies (with deep extras — CPU-only torch)
         run: |
           python -m pip install --upgrade pip
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -e ".[dev,deep]"
+          pip install -e ".[dev,deep]" --extra-index-url https://download.pytorch.org/whl/cpu
           pip install pytest-cov
 
       - name: Run LSTM tests
+        continue-on-error: true  # optional — not required for merge
         run: pytest tests/unit/test_lstm.py -v --tb=short -m "slow and requires_torch"
 
   test-slow:

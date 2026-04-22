@@ -47,6 +47,7 @@ try:
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
+    raise  # propagate so models/__init__.py guard can install _MissingExtra sentinel
 
 from boa_forecaster.config import OPTIMIZER_PENALTY
 from boa_forecaster.models.base import (
@@ -60,33 +61,34 @@ logger = logging.getLogger(__name__)
 
 # ── Private LSTM nn.Module ────────────────────────────────────────────────────
 
+if HAS_TORCH:
 
-class _LSTMModel(nn.Module):  # type: ignore[misc]
-    """A thin wrapper: stacked LSTM → linear head (last hidden state)."""
+    class _LSTMModel(nn.Module):  # type: ignore[misc]
+        """A thin wrapper: stacked LSTM → linear head (last hidden state)."""
 
-    def __init__(
-        self,
-        hidden_size: int,
-        num_layers: int,
-        dropout: float,
-    ) -> None:
-        super().__init__()
-        # PyTorch emits a UserWarning when dropout > 0 with num_layers == 1
-        effective_dropout = dropout if num_layers > 1 else 0.0
-        self.lstm = nn.LSTM(
-            input_size=1,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            dropout=effective_dropout,
-            batch_first=True,
-        )
-        self.fc = nn.Linear(hidden_size, 1)
+        def __init__(
+            self,
+            hidden_size: int,
+            num_layers: int,
+            dropout: float,
+        ) -> None:
+            super().__init__()
+            # PyTorch emits a UserWarning when dropout > 0 with num_layers == 1
+            effective_dropout = dropout if num_layers > 1 else 0.0
+            self.lstm = nn.LSTM(
+                input_size=1,
+                hidden_size=hidden_size,
+                num_layers=num_layers,
+                dropout=effective_dropout,
+                batch_first=True,
+            )
+            self.fc = nn.Linear(hidden_size, 1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
-        # x: (batch, seq_len, 1)
-        out, _ = self.lstm(x)  # out: (batch, seq_len, hidden_size)
-        last = out[:, -1, :]  # (batch, hidden_size)
-        return self.fc(last).squeeze(-1)  # (batch,)
+        def forward(self, x: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
+            # x: (batch, seq_len, 1)
+            out, _ = self.lstm(x)  # out: (batch, seq_len, hidden_size)
+            last = out[:, -1, :]  # (batch, hidden_size)
+            return self.fc(last).squeeze(-1)  # (batch,)
 
 
 # ── LSTMSpec ──────────────────────────────────────────────────────────────────
@@ -108,7 +110,9 @@ class LSTMSpec:
             ``build_forecaster``.
         device: ``"cpu"`` (default) or ``"auto"`` (use CUDA if available).
             Any other value raises :class:`ValueError`.
-        seed: RNG seed set inside every ``fit`` call for reproducibility.
+        seed: RNG seed set inside every fit call. Guarantees bit-exact
+            reproducibility on CPU; on CUDA, cuDNN LSTM kernels may still
+            produce small non-determinism — see PyTorch reproducibility docs.
 
     Raises:
         ImportError: If ``torch`` is not installed.
@@ -226,12 +230,12 @@ class LSTMSpec:
         try:
             raw = np.asarray(series, dtype=np.float64)
             window_size = self.window_size
-            if len(raw) <= window_size:
+            if len(raw) <= window_size + 1:
                 logger.debug(
-                    "LSTMSpec.evaluate: series length %d <= window_size %d; "
+                    "LSTMSpec.evaluate: series length %d <= window_size + 1 %d; "
                     "returning OPTIMIZER_PENALTY",
                     len(raw),
-                    window_size,
+                    window_size + 1,
                 )
                 return OPTIMIZER_PENALTY
 
@@ -260,11 +264,13 @@ class LSTMSpec:
             valid = ~np.isnan(y_pred_norm)
             y_pred = _denormalise(y_pred_norm[valid], mu, sigma)
             score = float(metric_fn(raw[valid], y_pred))
+            if not np.isfinite(score):
+                return OPTIMIZER_PENALTY
 
         except optuna.TrialPruned:
             raise
-        except Exception as exc:
-            logger.debug("LSTMSpec.evaluate failed for params=%s: %s", params, exc)
+        except Exception:
+            logger.warning("LSTM evaluate failed for params=%s", params, exc_info=True)
             return OPTIMIZER_PENALTY
 
         if trial is not None:
@@ -307,7 +313,14 @@ class LSTMSpec:
                     name=getattr(train, "name", None),
                 )
 
-            values, mu, sigma = _normalise(raw)
+            # H3: compute normalisation stats from the training slice only so
+            # that val-loss early-stopping is not biased by including val targets
+            # in the mu/sigma computation.
+            n_pairs = len(raw) - window_size
+            train_boundary = max(1, int(n_pairs * 0.8)) + window_size
+            mu, sigma = _train_stats(raw[:train_boundary])
+            values = (raw - mu) / sigma
+
             X, y = _make_windows(values.astype(np.float32), window_size)
             model = self._build_and_train(X, y, params, device)
             model.eval()
@@ -337,6 +350,8 @@ class LSTMSpec:
 
     def _seed_everything(self) -> None:
         """Set all relevant RNG seeds (called inside every fit)."""
+        import os
+
         random.seed(self.seed)
         np.random.seed(self.seed)
         torch.manual_seed(self.seed)
@@ -344,6 +359,11 @@ class LSTMSpec:
             torch.cuda.manual_seed_all(self.seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+        except Exception:
+            pass  # older torch versions may not support this
 
     def _build_and_train(
         self,
@@ -351,13 +371,14 @@ class LSTMSpec:
         y: np.ndarray,
         params: dict,
         device: torch.device,  # type: ignore[name-defined]
-    ) -> _LSTMModel:
+    ) -> _LSTMModel:  # type: ignore[name-defined]
         """Build and train an LSTM model with early stopping.
 
         The five searched hyperparameters override ``self`` attributes when
         present in *params*.
         """
         self._seed_everything()
+        logger.info("LSTMSpec seed=%d device=%s", self.seed, device)
 
         hidden_size = int(params.get("hidden_size", self.hidden_size))
         num_layers = int(params.get("num_layers", self.num_layers))
@@ -421,16 +442,22 @@ class LSTMSpec:
 # ── Module-level helpers ──────────────────────────────────────────────────────
 
 
+def _train_stats(train_slice: np.ndarray) -> tuple[float, float]:
+    """Return (mean, std) for a training slice, clamping near-zero std to 1.0."""
+    mu = float(np.mean(train_slice))
+    sigma = float(np.std(train_slice))
+    if sigma < 1e-8:
+        sigma = 1.0
+    return mu, sigma
+
+
 def _normalise(values: np.ndarray) -> tuple[np.ndarray, float, float]:
     """Z-score normalise *values*; return (normalised, mean, std).
 
     When std is near zero (constant series) std is set to 1.0 to avoid
     division by zero.
     """
-    mu = float(np.mean(values))
-    sigma = float(np.std(values))
-    if sigma < 1e-8:
-        sigma = 1.0
+    mu, sigma = _train_stats(values)
     return (values - mu) / sigma, mu, sigma
 
 

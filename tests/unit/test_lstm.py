@@ -221,6 +221,36 @@ def test_evaluate_degenerate_series_returns_penalty() -> None:
     assert score == OPTIMIZER_PENALTY
 
 
+def test_evaluate_len_equals_window_plus_one_returns_penalty() -> None:
+    """len(series) == window_size + 1 produces 1 supervised pair and empty X_val.
+
+    With the tightened guard (len <= window_size + 1) this should return
+    OPTIMIZER_PENALTY without silently falling back to the random-init model.
+    """
+    from boa_forecaster import LSTMSpec
+    from boa_forecaster.config import OPTIMIZER_PENALTY
+    from boa_forecaster.metrics import combined_metric
+
+    window_size = 6
+    # Exactly window_size + 1 points → 1 supervised pair → empty val set
+    n = window_size + 1
+    idx = pd.date_range("2021-01-01", periods=n, freq="MS")
+    series = pd.Series(np.arange(1.0, n + 1.0), index=idx)
+    spec = LSTMSpec(window_size=window_size)
+    score = spec.evaluate(
+        series,
+        {
+            "hidden_size": 8,
+            "num_layers": 1,
+            "dropout": 0.0,
+            "learning_rate": 1e-3,
+            "n_epochs": 3,
+        },
+        combined_metric,
+    )
+    assert score == OPTIMIZER_PENALTY
+
+
 # ---------------------------------------------------------------------------
 # build_forecaster
 # ---------------------------------------------------------------------------
@@ -302,7 +332,7 @@ def test_determinism(train_series, tiny_params) -> None:
     spec_b = LSTMSpec(forecast_horizon=6, window_size=6, batch_size=8, seed=42)
     fc_a = spec_a.build_forecaster(tiny_params)(train_series)
     fc_b = spec_b.build_forecaster(tiny_params)(train_series)
-    np.testing.assert_allclose(fc_a.values, fc_b.values, atol=1e-6)
+    np.testing.assert_array_equal(fc_a.values, fc_b.values)
 
 
 # ---------------------------------------------------------------------------
