@@ -95,6 +95,9 @@ class OptimizationResult:
     n_trials: int
     model_name: str
     is_fallback: bool = False
+    quantile_forecasts: object | None = None
+    """Optional quantile forecasts attached by callers who fit a probabilistic
+    spec.  ``None`` for point-forecast models."""
 
     def save(self, path: str | Path) -> None:
         """Persist this result to *path* using joblib serialisation."""
