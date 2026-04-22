@@ -346,6 +346,23 @@ spec = RandomForestSpec(feature_config=config)
 | `XGBoostSpec` | `xgboost` | n_estimators, max_depth, learning_rate, subsample, colsample_bytree, reg_alpha, reg_lambda |
 | `LightGBMSpec` | `lightgbm` | n_estimators, num_leaves, max_depth, learning_rate, subsample, colsample_bytree, reg_alpha, reg_lambda |
 | `ProphetSpec` | `prophet` | changepoint_prior_scale, seasonality_prior_scale, holidays_prior_scale, seasonality_mode |
+| `QuantileMLSpec` | `lightgbm` or `xgboost` | shared with base (LGBM or XGB); plus quantiles list |
+
+### Probabilistic forecasts
+
+`QuantileMLSpec` fits one gradient-booster per quantile to produce prediction intervals:
+
+```python
+from boa_forecaster import QuantileMLSpec, optimize_model
+
+spec = QuantileMLSpec(base="lightgbm", quantiles=(0.1, 0.5, 0.9))
+result = optimize_model(series, spec, n_trials=30)
+
+qf = spec.build_quantile_forecaster(result.best_params)(series)
+print(qf.lower, qf.median, qf.upper)  # all pd.Series, lower ≤ median ≤ upper guaranteed
+```
+
+Backends: `"lightgbm"` (default) uses `objective="quantile"`; `"xgboost"` uses `objective="reg:quantileerror"`. Both need the `[ml]` extra. Monotonicity (`lower ≤ median ≤ upper`) is enforced via per-step isotonic sort. For point-forecast use, `spec.build_forecaster(result.best_params)` returns a `pd.Series` of the median only, so `QuantileMLSpec` is compatible with `run_model_comparison` and `EnsembleSpec`.
 
 ### Adding a new model
 

@@ -27,6 +27,8 @@ from typing import Callable
 
 import numpy as np
 
+from boa_forecaster.metrics_probabilistic import pinball_loss
+
 _registry_lock = threading.Lock()
 
 
@@ -438,6 +440,7 @@ METRIC_REGISTRY: dict[str, Callable[..., float]] = {
     "mape": mape,
     "hit_rate": hit_rate,
     "hit_rate_weighted": hit_rate_weighted,
+    "pinball_loss": pinball_loss,
 }
 
 # Registry for metrics that return a dict rather than a scalar float.
