@@ -238,6 +238,7 @@ pip install -e ".[dev,ml]"
 ```bash
 pip install -e ".[xgboost]"    # XGBoost only
 pip install -e ".[lightgbm]"   # LightGBM only
+pip install -e ".[prophet]"    # Prophet only (trend + seasonality + holidays)
 pip install -e ".[ml]"         # XGBoost + LightGBM (scikit-learn is always installed)
 ```
 
@@ -344,6 +345,7 @@ spec = RandomForestSpec(feature_config=config)
 | `RandomForestSpec` | none (scikit-learn is core) | n_estimators, max_depth, min_samples_split, min_samples_leaf, max_features |
 | `XGBoostSpec` | `xgboost` | n_estimators, max_depth, learning_rate, subsample, colsample_bytree, reg_alpha, reg_lambda |
 | `LightGBMSpec` | `lightgbm` | n_estimators, num_leaves, max_depth, learning_rate, subsample, colsample_bytree, reg_alpha, reg_lambda |
+| `ProphetSpec` | `prophet` | changepoint_prior_scale, seasonality_prior_scale, holidays_prior_scale, seasonality_mode |
 
 ### Adding a new model
 

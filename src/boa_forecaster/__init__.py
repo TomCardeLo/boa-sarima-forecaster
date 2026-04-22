@@ -37,8 +37,9 @@ from boa_forecaster.metrics import (
 from boa_forecaster.models import (
     MODEL_REGISTRY,
     EnsembleSpec,
-    LightGBMSpec,  # None if lightgbm not installed
-    XGBoostSpec,  # None if xgboost not installed
+    LightGBMSpec,  # _MissingExtra sentinel if lightgbm not installed
+    ProphetSpec,  # _MissingExtra sentinel if prophet not installed
+    XGBoostSpec,  # _MissingExtra sentinel if xgboost not installed
     build_ensemble,
     get_model_spec,
     register_model,
@@ -114,6 +115,7 @@ __all__ = [
     "RandomForestSpec",
     "XGBoostSpec",
     "LightGBMSpec",
+    "ProphetSpec",
     "EnsembleSpec",
     "build_ensemble",
     "MODEL_REGISTRY",
