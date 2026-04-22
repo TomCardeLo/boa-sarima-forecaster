@@ -62,6 +62,9 @@ from boa_forecaster.models.sarima import SARIMASpec, forecast_arima, pred_arima
 # ── Optimisation engine (Phase 1) ────────────────────────────────────────────
 from boa_forecaster.optimizer import optimize_arima, optimize_model
 
+# ── Post-processing (H5) ─────────────────────────────────────────────────────
+from boa_forecaster.postprocess import apply_seasonal_bias, compute_seasonal_bias
+
 # ── Preprocessing & standardisation (Phase 0) ────────────────────────────────
 from boa_forecaster.preprocessor import clean_zeros, fill_blanks, flag_intermittent
 from boa_forecaster.standardization import (
@@ -136,6 +139,9 @@ __all__ = [
     # optimisation
     "optimize_model",
     "optimize_arima",
+    # post-processing
+    "compute_seasonal_bias",
+    "apply_seasonal_bias",
     # benchmarks & comparison
     "seasonal_naive",
     "ets_model",

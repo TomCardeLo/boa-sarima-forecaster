@@ -49,7 +49,23 @@ logger = logging.getLogger(__name__)
         "Default is off for v2.x back-compat."
     ),
 )
-def run(config_path: str, output_dir: str, n_trials: int | None, strict: bool) -> None:
+@click.option(
+    "--bias-correction",
+    "bias_correction",
+    is_flag=True,
+    default=False,
+    help=(
+        "Compute per-month multiplicative bias factors from the final CV fold "
+        "and apply them to the forecast before writing outputs."
+    ),
+)
+def run(
+    config_path: str,
+    output_dir: str,
+    n_trials: int | None,
+    strict: bool,
+    bias_correction: bool,
+) -> None:
     """Optimise the active model and emit a point forecast."""
     cfg = BoaConfig.load(config_path, strict=strict)
     out = ensure_output_dir(output_dir)
@@ -64,10 +80,18 @@ def run(config_path: str, output_dir: str, n_trials: int | None, strict: bool) -
         n_calls=n_calls,
         n_jobs=cfg.optimization.n_jobs,
         metric_components=metric_components_as_dicts(cfg),
+        apply_bias_correction=bias_correction,
     )
 
     forecaster = spec.build_forecaster(result.best_params)
     forecast = forecaster(series)
+
+    if bias_correction and result.bias_correction is not None:
+        from boa_forecaster.postprocess import apply_seasonal_bias
+
+        forecast = apply_seasonal_bias(forecast, result.bias_correction)
+        rounded = [round(float(f), 3) for f in result.bias_correction]
+        click.echo(f"[run] bias_correction applied: factors={rounded}")
 
     click.echo(
         f"[run] model={result.model_name} "

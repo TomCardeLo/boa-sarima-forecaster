@@ -54,6 +54,59 @@ logger = logging.getLogger(__name__)
 _MIN_SERIES_LENGTH: int = 24
 
 
+def _compute_bias_from_last_fold(
+    series: pd.Series,
+    model_spec: ModelSpec,
+    best_params: dict,
+    feature_config: FeatureConfig | None,
+) -> np.ndarray | None:
+    """Compute seasonal bias factors from the last CV fold's residuals.
+
+    Uses the same expanding-window math as ``walk_forward_validation`` with
+    ``n_folds=3, test_size=12, min_train_size=24``.  The final (third) fold's
+    train/test split is replicated here so no extra imports are needed and the
+    logic stays co-located with the call site.
+
+    Returns ``None`` on any failure so callers always get a clean result.
+    """
+    from boa_forecaster.postprocess import compute_seasonal_bias
+
+    n_folds = 3
+    test_size = 12
+    min_train_size = 24
+    required = min_train_size + n_folds * test_size
+    if len(series) < required:
+        return None
+
+    try:
+        forecaster = model_spec.build_forecaster(best_params, feature_config)
+        # Last fold indices (zero-based fold index = n_folds - 1)
+        last_fold = n_folds - 1
+        train_end = min_train_size + last_fold * test_size
+        test_end = train_end + test_size
+
+        train = series.iloc[:train_end]
+        test = series.iloc[train_end:test_end]
+
+        predictions = forecaster(train)
+        y_true = test.values[: len(predictions)]
+        y_pred = predictions.values[: len(y_true)]
+
+        # Re-slice the test index to match trimmed length for DatetimeIndex alignment
+        test_index = test.index[: len(y_true)]
+        y_true_s = pd.Series(y_true, index=test_index)
+        y_pred_s = pd.Series(y_pred, index=test_index)
+
+        return compute_seasonal_bias(y_true_s, y_pred_s, periods=12, start_period=1)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Bias computation failed for %s: %s — bias_correction will be None.",
+            model_spec.name,
+            exc,
+        )
+        return None
+
+
 def _validate_series(series: pd.Series, min_length: int = _MIN_SERIES_LENGTH) -> None:
     """Validate *series* before running optimisation.
 
@@ -89,6 +142,9 @@ def _validate_series(series: pd.Series, min_length: int = _MIN_SERIES_LENGTH) ->
         )
 
 
+_MIN_BIAS_SERIES_LENGTH: int = 36  # need at least 3 full periods for bias
+
+
 def optimize_model(
     series: pd.Series,
     model_spec: ModelSpec,
@@ -98,6 +154,7 @@ def optimize_model(
     feature_config: FeatureConfig | None = None,
     seed: int = 42,
     verbose: bool = False,
+    apply_bias_correction: bool = False,
 ) -> OptimizationResult:
     """Run a TPE Bayesian search over a ``ModelSpec``'s search space.
 
@@ -113,10 +170,16 @@ def optimize_model(
             ``model_spec.needs_features is False``.
         seed: TPE sampler seed for reproducibility.
         verbose: If ``True``, Optuna logs trial progress to stdout.
+        apply_bias_correction: When ``True``, compute per-period multiplicative
+            bias factors from the final CV fold's residuals after the study
+            completes, and attach them to ``OptimizationResult.bias_correction``.
+            Default ``False`` preserves backward compatibility.
 
     Returns:
         ``OptimizationResult`` with ``best_params``, ``best_score``,
-        ``n_trials``, and ``model_name``.
+        ``n_trials``, and ``model_name``.  When ``apply_bias_correction=True``
+        and the series is long enough, ``result.bias_correction`` contains a
+        ``np.ndarray`` of shape ``(12,)`` with the per-month factors.
     """
     _validate_series(series)
 
@@ -216,12 +279,19 @@ def optimize_model(
         study.best_value,
     )
 
+    bias: np.ndarray | None = None
+    if apply_bias_correction and len(series) >= _MIN_BIAS_SERIES_LENGTH:
+        bias = _compute_bias_from_last_fold(
+            series, model_spec, study.best_params, feature_config
+        )
+
     return OptimizationResult(
         best_params=study.best_params,
         best_score=study.best_value,
         n_trials=len(study.trials),
         model_name=model_spec.name,
         is_fallback=False,
+        bias_correction=bias,
     )
 
 

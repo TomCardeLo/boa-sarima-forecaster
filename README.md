@@ -132,6 +132,35 @@ zero.
 The per-SKU loop is parallelised with `joblib.Parallel(backend="loky")`,
 enabling all available CPU cores to be utilised.
 
+### 6 — Seasonal Bias Correction
+
+After the optimiser selects the best parameters, an optional post-training
+step computes per-calendar-month multiplicative correction factors from the
+final CV fold's residuals.  The factors are the **median of
+`y_true / y_pred`** per month, clipped to `[0.5, 2.0]` to prevent
+blow-ups.  This pattern is validated in the CAR PM2.5 production pipeline
+(`sesgo_mensual_para_ajuste.csv`, 12 rows, columns `mes, factor`).
+
+```python
+import pandas as pd
+from boa_forecaster import optimize_model, apply_seasonal_bias
+from boa_forecaster.models.sarima import SARIMASpec
+
+# Enable bias correction during optimisation
+result = optimize_model(series, SARIMASpec(), n_calls=50, apply_bias_correction=True)
+
+# Inspect the per-month factors (shape: (12,), index 0 = January)
+print(result.bias_correction)
+# e.g. [0.98, 1.03, 1.12, 0.94, ...]
+
+# Apply to a new forecast
+forecaster = SARIMASpec().build_forecaster(result.best_params)
+raw_forecast = forecaster(series)
+corrected_forecast = apply_seasonal_bias(raw_forecast, result.bias_correction)
+```
+
+Enable via the CLI with `boa-forecaster run --bias-correction`.
+
 ---
 
 ## Results

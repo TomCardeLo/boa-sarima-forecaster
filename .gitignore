@@ -96,3 +96,5 @@ logs/
 
 # ── Internal planning & improvement notes ─────────────────────────────────────
 tasks/
+CLAUDE.md
+.claude/

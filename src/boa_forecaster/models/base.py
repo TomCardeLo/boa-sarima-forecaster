@@ -98,6 +98,10 @@ class OptimizationResult:
     quantile_forecasts: object | None = None
     """Optional quantile forecasts attached by callers who fit a probabilistic
     spec.  ``None`` for point-forecast models."""
+    bias_correction: object | None = None
+    """Optional per-period multiplicative bias factors computed by
+    post-training seasonal bias correction.  ``None`` when disabled or
+    when the study fell back."""
 
     def save(self, path: str | Path) -> None:
         """Persist this result to *path* using joblib serialisation."""
