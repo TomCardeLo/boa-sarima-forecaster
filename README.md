@@ -1,12 +1,12 @@
 # BOA Forecaster
 
-> Multi-model demand forecasting with Bayesian Optimisation (Optuna TPE) — SARIMA, Random Forest, XGBoost, LightGBM
+> Multi-model time-series forecasting with Bayesian Optimisation (Optuna TPE) — SARIMA, Random Forest, XGBoost, LightGBM, Prophet, LSTM, QuantileML, and weighted ensembles.
 
-> **Note:** The repository name `boa-sarima-forecaster` is historical — v2.0 supports multiple model families beyond SARIMA.
+> **Note:** The repository name `boa-sarima-forecaster` is historical — v2.0+ supports multiple model families beyond SARIMA. Frequencies beyond monthly (weekly, daily, hourly) are supported out of the box.
 
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-2.0.0-brightgreen)
+![Version](https://img.shields.io/badge/version-2.4.0-brightgreen)
 ![CI](https://github.com/TomCardeLo/boa-sarima-forecaster/actions/workflows/ci.yml/badge.svg)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/TomCardeLo/boa-sarima-forecaster/blob/main/notebooks/demo.ipynb)
 
@@ -14,7 +14,8 @@
 
 ## Table of Contents
 
-1. [What's New in v2.0](#whats-new-in-v20)
+1. [What's New in v2.4](#whats-new-in-v24)
+2. [What's New in v2.0](#whats-new-in-v20)
 2. [Motivation](#motivation)
 3. [Methodology](#methodology)
 4. [Results](#results)
@@ -31,6 +32,25 @@
 15. [Backward Compatibility](#backward-compatibility)
 16. [Contributing](#contributing)
 17. [License](#license)
+
+---
+
+## What's New in v2.4
+
+v2.4 ("Probabilistic, Regulatory & Deep-Learning Horizons") extends the framework with three new model families, probabilistic forecasts, regulatory-grade bucket metrics, and post-training bias correction — all additive, no breaking changes:
+
+- **`ProphetSpec`** — Meta's Prophet as a first-class `ModelSpec` for interpretable trend + seasonality + holidays (behind the `prophet` extra).
+- **`QuantileMLSpec`** — probabilistic forecasts via LightGBM `objective="quantile"` or XGBoost `reg:quantileerror`, returning `QuantileForecast(median, lower, upper)`. New `pinball_loss` and `interval_coverage` metrics in `metrics_probabilistic.py`.
+- **`LSTMSpec`** — PyTorch LSTM baseline with train-only normalisation and patience-based early stopping (behind the `deep` extra; CPU by default).
+- **`EnsembleSpec` + `build_ensemble()`** — post-optimisation weighted average of any mix of `ModelSpec`s (inverse-CV-loss or equal weighting), with a safety warning when mixing early-stopping and full-fold members.
+- **SARIMA hourly tuning** — `SARIMASpec.for_frequency("h")` exposes a tuneable `seasonal_period ∈ {24, 168}` (daily vs. weekly cycle).
+- **Bucketed metrics** — `hit_rate_weighted` and `f1_by_bucket` for tiered accuracy where class landing matters more than absolute error.
+- **`presets/air_quality.py`** — first preset pack (ICA / US EPA AQI edges + `hit_rate_ica`); opens the door for `presets/demand.py`, `presets/energy.py`, etc.
+- **Post-training seasonal bias correction** — `postprocess.compute_seasonal_bias` / `apply_seasonal_bias` and `optimize_model(..., apply_bias_correction=True)` for per-calendar-month multiplicative correction.
+- **Pydantic config polish** — `BoaConfig.from_dict(...)`, `Literal` validators on sub-models, and a CLI `--strict` flag that flips `extra="allow"` → `extra="forbid"`.
+- **`WMA_THRESHOLD_HIGH_VOLATILITY = 3.5`** — opt-in named constant for peaky series (air quality, energy, stockout-recovery, fat-tailed returns, IoT bursts).
+
+See [CHANGELOG.md](CHANGELOG.md) for the full v2.4.0 release notes.
 
 ---
 
@@ -63,10 +83,11 @@ evaluations to focus on promising parameter regions. The result is a
 production-ready pipeline that:
 
 - Automatically finds the best model order / hyperparameters per time series.
-- Supports SARIMA, Random Forest, XGBoost, and LightGBM via a unified API.
-- Clips outliers via a weighted moving-average smoother.
+- Supports SARIMA, Random Forest, XGBoost, LightGBM, Prophet, LSTM, and QuantileML via a unified `ModelSpec` protocol, plus weighted ensembles.
+- Emits probabilistic forecasts (quantile bands) on demand, not just point forecasts.
+- Clips outliers via a weighted moving-average smoother, with a named opt-in for high-volatility series.
 - Scales to hundreds of SKUs via parallel execution.
-- Works with a single time series (no SKU / Country columns required).
+- Works with a single time series (no SKU / Country columns required) and with monthly, weekly, daily, or hourly frequencies.
 
 ---
 
@@ -197,27 +218,39 @@ boa-sarima-forecaster/
 ├── config.example.yaml          ← copy to config.yaml and customise
 │
 ├── src/
-│   ├── boa_forecaster/          ← primary package (v2.0)
-│   │   ├── __init__.py          ← public API re-exports
-│   │   ├── config.py            ← global constants and defaults
-│   │   ├── data_loader.py       ← Excel ingestion and cleaning
-│   │   ├── preprocessor.py      ← date fill, zero removal
-│   │   ├── standardization.py   ← weighted moving-average outlier clipping
-│   │   ├── metrics.py           ← sMAPE, RMSLE, MAE, RMSE, MAPE, build_combined_metric
-│   │   ├── features.py          ← FeatureConfig + FeatureEngineer (ML models)
-│   │   ├── optimizer.py         ← optimize_model() — generic Optuna TPE engine
-│   │   ├── validation.py        ← walk_forward_validation, validate_by_group
-│   │   ├── benchmarks.py        ← run_model_comparison, baseline models
-│   │   └── models/
-│   │       ├── __init__.py      ← MODEL_REGISTRY, get_model_spec, register_model
-│   │       ├── base.py          ← ModelSpec Protocol, OptimizationResult, param types
-│   │       ├── sarima.py        ← SARIMASpec (statsmodels SARIMAX)
-│   │       ├── random_forest.py ← RandomForestSpec (scikit-learn)
-│   │       ├── xgboost.py       ← XGBoostSpec (requires xgboost extra)
-│   │       └── lightgbm.py      ← LightGBMSpec (requires lightgbm extra)
+│   ├── boa_forecaster/              ← primary package (v2.4)
+│   │   ├── __init__.py              ← public API re-exports
+│   │   ├── config.py                ← global constants and defaults
+│   │   ├── config_schema.py         ← Pydantic BoaConfig (Literal validators, --strict)
+│   │   ├── data_loader.py           ← Excel ingestion and cleaning
+│   │   ├── preprocessor.py          ← date fill, zero removal, intermittency flagging
+│   │   ├── standardization.py       ← weighted moving-average outlier clipping
+│   │   ├── metrics.py               ← sMAPE, RMSLE, MAE, RMSE, MAPE, hit_rate, hit_rate_weighted, f1_by_bucket
+│   │   ├── metrics_probabilistic.py ← pinball_loss, interval_coverage
+│   │   ├── features.py              ← FeatureConfig + FeatureEngineer (ML models)
+│   │   ├── optimizer.py             ← optimize_model() — generic Optuna TPE engine
+│   │   ├── validation.py            ← walk_forward_validation, validate_by_group
+│   │   ├── benchmarks.py            ← run_model_comparison, baseline models
+│   │   ├── postprocess.py           ← compute_seasonal_bias, apply_seasonal_bias (H5)
+│   │   ├── cli/                     ← boa-forecaster CLI (run, compare, validate)
+│   │   ├── models/
+│   │   │   ├── __init__.py          ← MODEL_REGISTRY, get_model_spec, register_model
+│   │   │   ├── base.py              ← ModelSpec Protocol, OptimizationResult, param types
+│   │   │   ├── _ml_base.py          ← BaseMLSpec shared by gradient-booster specs
+│   │   │   ├── sarima.py            ← SARIMASpec (statsmodels SARIMAX, hourly tuneable)
+│   │   │   ├── random_forest.py    ← RandomForestSpec (scikit-learn)
+│   │   │   ├── xgboost.py           ← XGBoostSpec (requires xgboost extra)
+│   │   │   ├── lightgbm.py          ← LightGBMSpec (requires lightgbm extra)
+│   │   │   ├── prophet.py           ← ProphetSpec (requires prophet extra)
+│   │   │   ├── quantile.py          ← QuantileMLSpec + QuantileForecast
+│   │   │   ├── lstm.py              ← LSTMSpec (requires deep/torch extra)
+│   │   │   └── ensemble.py          ← EnsembleSpec + build_ensemble
+│   │   └── presets/
+│   │       ├── __init__.py
+│   │       └── air_quality.py       ← ICA / US EPA AQI edges + hit_rate_ica helpers
 │   │
-│   └── sarima_bayes/            ← deprecated shim — re-exports boa_forecaster
-│       └── __init__.py          ← emits DeprecationWarning on import
+│   └── sarima_bayes/                ← deprecated shim — re-exports boa_forecaster
+│       └── __init__.py              ← emits DeprecationWarning on import
 │
 ├── tests/
 │   ├── conftest.py
@@ -376,6 +409,8 @@ spec = RandomForestSpec(feature_config=config)
 | `LightGBMSpec` | `lightgbm` | n_estimators, num_leaves, max_depth, learning_rate, subsample, colsample_bytree, reg_alpha, reg_lambda |
 | `ProphetSpec` | `prophet` | changepoint_prior_scale, seasonality_prior_scale, holidays_prior_scale, seasonality_mode |
 | `QuantileMLSpec` | `lightgbm` or `xgboost` | shared with base (LGBM or XGB); plus quantiles list |
+| `LSTMSpec` | `deep` (torch) | hidden_size, num_layers, dropout, learning_rate, n_epochs, batch_size, window_size |
+| `EnsembleSpec` | — (inherits from members) | post-optimisation weighted average; `weighting="inverse_cv_loss"` or `"equal"`. Build with `build_ensemble(series, [SpecA(), SpecB(), ...])`. |
 
 ### Probabilistic forecasts
 
