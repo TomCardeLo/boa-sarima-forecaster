@@ -16,22 +16,24 @@
 
 1. [What's New in v2.4](#whats-new-in-v24)
 2. [What's New in v2.0](#whats-new-in-v20)
-2. [Motivation](#motivation)
-3. [Methodology](#methodology)
-4. [Results](#results)
-5. [Project Structure](#project-structure)
-6. [Installation](#installation)
-7. [Quick Start](#quick-start)
-8. [ML Models](#ml-models)
-9. [Input Data Format](#input-data-format)
-10. [Configuration](#configuration)
-11. [Configurable Metric](#configurable-metric)
-12. [Validation & Benchmarks](#validation--benchmarks)
-13. [Running the Demo Notebook](#running-the-demo-notebook)
-14. [Output Files](#output-files)
-15. [Backward Compatibility](#backward-compatibility)
-16. [Contributing](#contributing)
-17. [License](#license)
+3. [Motivation](#motivation)
+4. [Methodology](#methodology)
+5. [Results](#results)
+6. [Project Structure](#project-structure)
+7. [Installation](#installation)
+8. [Quick Start](#quick-start)
+9. [End-to-End Scripts](#end-to-end-scripts)
+10. [Command-Line Interface](#command-line-interface)
+11. [ML Models](#ml-models)
+12. [Input Data Format](#input-data-format)
+13. [Configuration](#configuration)
+14. [Configurable Metric](#configurable-metric)
+15. [Validation & Benchmarks](#validation--benchmarks)
+16. [Running the Demo Notebook](#running-the-demo-notebook)
+17. [Output Files](#output-files)
+18. [Backward Compatibility](#backward-compatibility)
+19. [Contributing](#contributing)
+20. [License](#license)
 
 ---
 
@@ -266,7 +268,15 @@ boa-sarima-forecaster/
 ├── notebooks/
 │   └── demo.ipynb
 │
+├── scripts/                     ← end-to-end production runners (argparse CLIs)
+│   ├── forecast_by_group.py     ← per-(SKU, Country) SARIMA + Optuna
+│   ├── plot_forecasts_by_group.py  ← historical + forecast plots
+│   └── forecast_full.py         ← multi-model (SARIMA + XGB + LGBM + QuantileML)
+│
 └── docs/
+    ├── cli.md
+    ├── ensemble.md
+    ├── extending_models.md
     └── methodology.md
 ```
 
@@ -364,6 +374,103 @@ from sarima_bayes import optimize_arima, forecast_arima   # emits DeprecationWar
 
 best_params, score = optimize_arima(series=series, n_calls=30)
 ```
+
+---
+
+## End-to-End Scripts
+
+The `scripts/` folder ships three argparse-driven runners that wrap the
+library into reproducible production workflows.  All flags are
+discoverable with `--help`, and defaults reproduce the parameters used
+in the reference KCP run (n_trials = 20–30, wma_threshold = 1.5,
+horizon = 12, min_months = 24).
+
+### `scripts/forecast_by_group.py` — SARIMA per group
+
+Runs SARIMA + Optuna TPE for every `(SKU, Country)` combination in the
+input workbook and concatenates results into a single CSV/Excel.  Groups
+shorter than `--min-months` (default 24, the practical floor for
+SARIMA with `m = 12`) are skipped.
+
+```bash
+python scripts/forecast_by_group.py                                   # defaults
+python scripts/forecast_by_group.py --n-trials 50 --horizon 18        # more search
+python scripts/forecast_by_group.py --input data/input/sales.xlsx \
+    --sheet Data --skip-rows 0 --freq MS --output-dir data/output/by_group
+```
+
+Outputs (under `--output-dir`): `forecast_by_group.csv`,
+`forecast_by_group.xlsx`, `metrics_by_group.csv` (best params + score
+per series, plus `status` for skipped/errored groups).
+
+### `scripts/plot_forecasts_by_group.py` — visualise per group
+
+Reads the CSV produced above and renders one PNG per group plus a
+summary grid.  Requires `matplotlib`.
+
+```bash
+python scripts/plot_forecasts_by_group.py                              # defaults
+python scripts/plot_forecasts_by_group.py \
+    --forecast-csv data/output/by_group/forecast_by_group.csv \
+    --metrics-csv  data/output/by_group/metrics_by_group.csv \
+    --output-dir   data/output/by_group/plots
+```
+
+### `scripts/forecast_full.py` — multi-model + probabilistic + WMA
+
+The flagship runner.  For each group it:
+
+1. Trims leading zeros (handles late-launched SKUs).
+2. Optimises SARIMA, XGBoost and LightGBM on the **raw** series **and**
+   on a WMA-smoothed copy, keeping the variant with the lower CV score
+   (the `clip_outliers` / variant-selection logic from the legacy v1.x
+   pipeline).
+3. Adds P10 / P50 / P90 bands via `QuantileMLSpec(base="lightgbm")`.
+4. Renders one PNG per group plus a grid summary.
+
+```bash
+python scripts/forecast_full.py                            # defaults
+python scripts/forecast_full.py --wma-threshold 2.5        # more conservative clip
+python scripts/forecast_full.py --n-jobs 8 --n-trials 50   # tune runtime
+```
+
+Per-group fits run in parallel via `joblib` (default
+`--n-jobs = min(15, os.cpu_count())`).  See `--help` for the full flag
+list (input path, sheet, frequency, horizon, smoothing window/threshold,
+output directory).
+
+> **Note:** `forecast_full.py` does not include `ProphetSpec` because Prophet's
+> `cmdstan` backend requires MinGW on Windows; on Linux/macOS you can add it
+> by editing the `[("SARIMA", ...), ("XGBoost", ...), ("LightGBM", ...)]`
+> tuple in `_process_group`.
+
+---
+
+## Command-Line Interface
+
+In addition to the standalone scripts above, the package installs a
+Click-based console entry point `boa-forecaster` (also reachable as
+`python -m boa_forecaster`).  It is configuration-driven — point it at a
+`config.yaml` file and it dispatches the active model to the requested
+subcommand.
+
+```bash
+boa-forecaster run      --config config.yaml --output out/
+boa-forecaster validate --config config.yaml --output out/ --n-folds 3 --test-size 12
+boa-forecaster compare  --config config.yaml --output out/
+```
+
+| Subcommand | Purpose |
+|------------|---------|
+| `run` | Optimise active model and emit `forecast.csv` + `params.json` (+ `plot.png` if `matplotlib` is installed) |
+| `validate` | Walk-forward CV → `folds.csv` + `metrics.csv` |
+| `compare` | Optimise every enabled model + zero-budget baselines (Seasonal-Naïve, ETS) and rank them |
+
+Useful flags: `--n-trials INT` (override `optimization.n_calls`),
+`--bias-correction` (apply the per-month seasonal-bias factors from
+§ 6 of the methodology), `--strict` (flip the Pydantic schema from
+`extra="allow"` to `extra="forbid"`).  See [`docs/cli.md`](docs/cli.md)
+for the full reference.
 
 ---
 
