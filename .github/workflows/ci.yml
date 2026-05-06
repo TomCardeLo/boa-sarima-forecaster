@@ -124,6 +124,32 @@ jobs:
       - name: Run slow tests
         run: pytest tests/ -v --tb=short -m slow --durations=10
 
+      # GitHub Actions runners are ephemeral, so `.benchmarks/` starts empty on
+      # every cron. Without a restored baseline `--benchmark-compare-fail` errors
+      # with "requires valid --benchmark-compare". This cache pulls the most
+      # recent baseline saved on a previous run (matched via restore-keys); the
+      # exact key is unique per run_id so the post-step save always writes a
+      # fresh entry for the next cron to consume.
+      - name: Restore benchmark baseline cache
+        uses: actions/cache@v4
+        with:
+          path: .benchmarks
+          key: pytest-benchmark-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            pytest-benchmark-${{ runner.os }}-
+
+      - name: Detect benchmark baseline
+        id: baseline
+        shell: bash
+        run: |
+          if compgen -G ".benchmarks/*/*.json" > /dev/null; then
+            echo "has_baseline=true" >> "$GITHUB_OUTPUT"
+            echo "Found baseline benchmark files — regression gate active."
+          else
+            echo "has_baseline=false" >> "$GITHUB_OUTPUT"
+            echo "No baseline found — recording initial baseline, no regression gate this run."
+          fi
+
       - name: Run perf benchmarks (regression gate)
         # `--benchmark-autosave` writes `.benchmarks/<machine>/<runid>.json`
         # so comparisons can accumulate run-over-run.  `--benchmark-compare`
@@ -131,12 +157,20 @@ jobs:
         # as the baseline; `--benchmark-compare-fail=mean:20%` fails the job
         # if any bench's mean time regresses by more than 20% versus that
         # baseline (noise-tolerant, catches real regressions).
+        if: steps.baseline.outputs.has_baseline == 'true'
         run: |
           pytest tests/perf/ -v --tb=short -m perf \
             --benchmark-only \
             --benchmark-autosave \
             --benchmark-compare \
             --benchmark-compare-fail=mean:20%
+
+      - name: Run perf benchmarks (initial baseline, no gate)
+        if: steps.baseline.outputs.has_baseline == 'false'
+        run: |
+          pytest tests/perf/ -v --tb=short -m perf \
+            --benchmark-only \
+            --benchmark-autosave
 
       - name: Upload benchmark artefacts
         if: always()
