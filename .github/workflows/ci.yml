@@ -143,8 +143,17 @@ jobs:
         shell: bash
         run: |
           if compgen -G ".benchmarks/*/*.json" > /dev/null; then
-            echo "has_baseline=true" >> "$GITHUB_OUTPUT"
-            echo "Found baseline benchmark files — regression gate active."
+            BASELINE_FILE=$(ls -t .benchmarks/*/*.json | head -1)
+            BASELINE_CPU=$(python3 -c "import json; d=json.load(open('${BASELINE_FILE}')); print(d.get('machine_info',{}).get('cpu',{}).get('vendor_id_raw','unknown'))" 2>/dev/null || echo "unknown")
+            CURRENT_CPU=$(python3 -c "import cpuinfo; print(cpuinfo.get_cpu_info().get('vendor_id_raw','unknown'))" 2>/dev/null || echo "unknown")
+            echo "Baseline CPU vendor: $BASELINE_CPU | Current CPU vendor: $CURRENT_CPU"
+            if [ "$BASELINE_CPU" != "unknown" ] && [ "$CURRENT_CPU" != "unknown" ] && [ "$BASELINE_CPU" != "$CURRENT_CPU" ]; then
+              echo "has_baseline=false" >> "$GITHUB_OUTPUT"
+              echo "CPU vendor mismatch — discarding stale baseline, recording fresh one (no regression gate this run)."
+            else
+              echo "has_baseline=true" >> "$GITHUB_OUTPUT"
+              echo "Found baseline benchmark files — regression gate active."
+            fi
           else
             echo "has_baseline=false" >> "$GITHUB_OUTPUT"
             echo "No baseline found — recording initial baseline, no regression gate this run."
